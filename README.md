@@ -2,7 +2,7 @@
 
 A standalone service that ingests change events (deployments, config changes, infra modifications) via webhooks and a REST API, then provides **change correlation** and **blast radius analysis** for incident triage.
 
-Designed as an optional companion to [RunbookAI](https://github.com/Runbook-Agent/runbook) — if configured, the CLI gains "what changed recently?" during investigations. If not configured, everything still works.
+Designed as an optional companion to [RunbookAI](https://github.com/Runbook-Agent/RunbookAI) — if configured, the CLI gains "what changed recently?" during investigations. If not configured, everything still works.
 
 ## Quick start
 
@@ -186,7 +186,7 @@ When correlating changes with an incident, each change is scored on four dimensi
 | Change risk | 15% | Blast radius risk level: critical = 1.0, high = 0.8, medium = 0.5, low = 0.2 |
 | Change type | 10% | deployment = 1.0, config_change = 0.9, feature_flag = 0.8, ... |
 
-## [RunbookAI](https://github.com/Runbook-Agent/runbook) CLI integration
+## [RunbookAI](https://github.com/Runbook-Agent/RunbookAI) CLI integration
 
 Add to `.runbook/config.yaml`:
 
