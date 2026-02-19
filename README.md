@@ -123,6 +123,7 @@ curl -X POST http://localhost:3001/api/v1/graph/import \
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/v1/graph/import` | Import service graph (JSON or YAML config format) |
+| `POST` | `/api/v1/graph/import/backstage` | Import from a Backstage service catalog |
 | `GET` | `/api/v1/graph/services` | List all services |
 | `GET` | `/api/v1/graph/dependencies/:service` | Get dependencies and dependents |
 | `POST` | `/api/v1/graph/discover` | Auto-discovery (stub — not yet implemented) |
@@ -188,6 +189,21 @@ curl -X POST http://localhost:3001/api/v1/webhooks/agent \
     "branch": "main",
     "files_changed": ["src/auth.ts", "src/token.ts"],
     "confidence": 0.9
+  }'
+```
+
+**Import from Backstage catalog:**
+
+```bash
+curl -X POST http://localhost:3001/api/v1/graph/import/backstage \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "base_url": "https://backstage.example.com",
+    "api_token": "your-backstage-token",
+    "options": {
+      "namespaces": ["default"],
+      "lifecycles": ["production"]
+    }
   }'
 ```
 

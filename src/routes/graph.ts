@@ -4,6 +4,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { loadGraphFromJson, mergeGraph } from '../graph-loader';
+import { BackstageImportRequestSchema, BackstageApiError, importFromBackstage } from '../backstage-client';
 
 export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/v1/graph/import — Import service graph (JSON or config format)
@@ -19,6 +20,41 @@ export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
     } catch (error) {
       return reply.status(400).send({
         error: 'Failed to import graph',
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // POST /api/v1/graph/import/backstage — Import from Backstage catalog
+  fastify.post('/api/v1/graph/import/backstage', async (request, reply) => {
+    const parsed = BackstageImportRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'Invalid request body',
+        details: parsed.error.issues,
+      });
+    }
+
+    try {
+      const { config, stats } = await importFromBackstage(parsed.data);
+      const incoming = loadGraphFromJson(config);
+      mergeGraph(fastify.serviceGraph, incoming, 'backstage');
+      const graphStats = fastify.serviceGraph.getStats();
+
+      return reply.send({
+        message: 'Backstage catalog imported successfully',
+        import_stats: stats,
+        graph_stats: graphStats,
+      });
+    } catch (error) {
+      if (error instanceof BackstageApiError) {
+        return reply.status(502).send({
+          error: 'Backstage API error',
+          details: error.message,
+        });
+      }
+      return reply.status(500).send({
+        error: 'Internal error during Backstage import',
         details: error instanceof Error ? error.message : String(error),
       });
     }

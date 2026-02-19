@@ -49,6 +49,7 @@ Change Correlator    Blast Radius Analyzer
 
 ```
 src/
+├── backstage-client.ts ← Backstage catalog client + entity→graph conversion.
 ├── types.ts            ← All domain types. THE canonical source of truth.
 ├── store.ts            ← SQLite store with FTS5. Pattern: better-sqlite3 + WAL mode.
 ├── service-graph.ts    ← In-memory dependency graph. Extracted from CLI's graph-store.ts.
@@ -61,7 +62,7 @@ src/
 │   ├── correlate.ts    ← POST /api/v1/correlate
 │   ├── blast-radius.ts ← POST /api/v1/blast-radius
 │   ├── velocity.ts     ← GET /api/v1/velocity/:service
-│   ├── graph.ts        ← Graph import, list, dependencies.
+│   ├── graph.ts        ← Graph import, list, dependencies, Backstage sync.
 │   └── webhooks/
 │       ├── github.ts   ← GitHub deployment/push/PR → ChangeEvent
 │       ├── aws.ts      ← AWS CodePipeline/ECS/Lambda → ChangeEvent
@@ -142,8 +143,9 @@ The correlator expands affected services to 2-hop graph neighbors before queryin
 ## Service Graph Population — Three Layers
 
 1. **Config-driven (implemented):** YAML file loaded on startup via `CHANGE_INTEL_GRAPH_PATH`. This is the primary mechanism today.
-2. **Auto-discovery (stubbed):** `POST /api/v1/graph/discover` returns 501. Future: AWS/K8s service enumeration + dependency inference.
-3. **Change event inference (stubbed):** `GET /api/v1/graph/suggestions` returns empty. Future: co-deployment and co-failure pattern analysis to suggest edges.
+2. **Backstage catalog import (implemented):** `POST /api/v1/graph/import/backstage` fetches entities from a Backstage instance and converts them to our graph model. Supports cursor-based pagination, optional filters (namespaces, lifecycles, types, systems), and non-destructive merge via `mergeGraph()`.
+3. **Auto-discovery (stubbed):** `POST /api/v1/graph/discover` returns 501. Future: AWS/K8s service enumeration + dependency inference.
+4. **Change event inference (stubbed):** `GET /api/v1/graph/suggestions` returns empty. Future: co-deployment and co-failure pattern analysis to suggest edges.
 
 ## Domain Types Quick Reference
 
@@ -180,6 +182,7 @@ FTS5 virtual table `change_events_fts` on `summary` + `service`, kept in sync vi
 | POST | `/blast-radius` | Predict blast radius |
 | GET | `/velocity/:service` | Change velocity (single window or trend) |
 | POST | `/graph/import` | Import graph (JSON config or export format) |
+| POST | `/graph/import/backstage` | Import from Backstage service catalog |
 | GET | `/graph/services` | List all services in graph |
 | GET | `/graph/dependencies/:service` | Dependencies + dependents for a service |
 | POST | `/graph/discover` | Auto-discovery (stub, returns 501) |
