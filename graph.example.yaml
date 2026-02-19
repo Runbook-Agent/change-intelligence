@@ -1,0 +1,123 @@
+# Example service graph configuration
+#
+# Copy this file to graph.yaml and customize for your infrastructure.
+# Load on startup: CHANGE_INTEL_GRAPH_PATH=graph.yaml npm start
+# Or import via API: curl -X POST localhost:3001/api/v1/graph/import -d @graph.json
+
+services:
+  - id: api-gateway
+    name: API Gateway
+    type: service
+    tier: critical
+    team: platform
+    tags: [api, public-facing]
+
+  - id: user-service
+    name: User Service
+    type: service
+    tier: high
+    team: accounts
+
+  - id: order-service
+    name: Order Service
+    type: service
+    tier: high
+    team: commerce
+
+  - id: payment-service
+    name: Payment Service
+    type: service
+    tier: critical
+    team: payments
+
+  - id: notification-service
+    name: Notification Service
+    type: service
+    tier: medium
+    team: platform
+    tags: [async, non-critical]
+
+  - id: users-db
+    name: Users Database
+    type: database
+    tier: critical
+    team: accounts
+
+  - id: orders-db
+    name: Orders Database
+    type: database
+    tier: critical
+    team: commerce
+
+  - id: redis-cache
+    name: Redis Cache
+    type: cache
+    tier: high
+    team: platform
+
+  - id: event-queue
+    name: Event Queue
+    type: queue
+    tier: high
+    team: platform
+
+dependencies:
+  # Gateway routes to services
+  - source: api-gateway
+    target: user-service
+    type: sync
+    criticality: critical
+
+  - source: api-gateway
+    target: order-service
+    type: sync
+    criticality: critical
+
+  - source: api-gateway
+    target: payment-service
+    type: sync
+    criticality: critical
+
+  # Service-to-database
+  - source: user-service
+    target: users-db
+    type: database
+    criticality: critical
+
+  - source: order-service
+    target: orders-db
+    type: database
+    criticality: critical
+
+  # Service-to-service
+  - source: order-service
+    target: payment-service
+    type: sync
+    criticality: critical
+
+  - source: order-service
+    target: notification-service
+    type: async
+    criticality: optional
+
+  # Caching
+  - source: user-service
+    target: redis-cache
+    type: cache
+    criticality: degraded
+
+  - source: order-service
+    target: redis-cache
+    type: cache
+    criticality: degraded
+
+  # Event-driven
+  - source: payment-service
+    target: event-queue
+    type: queue
+    criticality: degraded
+
+  - source: notification-service
+    target: event-queue
+    type: queue
+    criticality: critical

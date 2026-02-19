@@ -26,5 +26,14 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Runbook-Agent/change-intelligence.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Runbook-Agent/change-intelligence/issues"
+  },
+  "homepage": "https://github.com/Runbook-Agent/change-intelligence#readme"
 }
