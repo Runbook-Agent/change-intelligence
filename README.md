@@ -186,7 +186,7 @@ When correlating changes with an incident, each change is scored on four dimensi
 | Change risk | 15% | Blast radius risk level: critical = 1.0, high = 0.8, medium = 0.5, low = 0.2 |
 | Change type | 10% | deployment = 1.0, config_change = 0.9, feature_flag = 0.8, ... |
 
-## RunbookAI CLI integration
+## [RunbookAI](https://github.com/Runbook-Agent/runbook) CLI integration
 
 Add to `.runbook/config.yaml`:
 
