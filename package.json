@@ -1,0 +1,30 @@
+{
+  "name": "@runbook-agent/change-intelligence-service",
+  "version": "0.1.0",
+  "description": "Change Intelligence Service — webhook ingestion, change correlation, and blast radius analysis",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "fastify": "^5.2.1",
+    "yaml": "^2.4.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
