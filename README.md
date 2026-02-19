@@ -21,7 +21,9 @@ curl http://localhost:3001/api/v1/health
 
 ```
 Webhook Ingestion ──► SQLite Store ◄── Query API
-(GitHub, AWS)         (changes.db)     (REST)
+(GitHub, GitLab,      (changes.db)     (REST)
+ AWS, Terraform,
+ K8s, Agents)
        │                   │
        ▼                   ▼
 Change Correlator    Blast Radius Analyzer
@@ -44,6 +46,10 @@ All configuration is via environment variables:
 | `CHANGE_INTEL_DB_PATH` | `changes.db` | SQLite database file path |
 | `CHANGE_INTEL_GRAPH_PATH` | — | Path to a YAML service graph file |
 | `GITHUB_WEBHOOK_SECRET` | — | HMAC secret for GitHub webhook verification |
+| `GITLAB_WEBHOOK_SECRET` | — | Token for GitLab webhook verification |
+| `TERRAFORM_WEBHOOK_SECRET` | — | HMAC-SHA512 secret for Terraform Cloud webhook verification |
+| `AGENT_WEBHOOK_SECRET` | — | Bearer token for coding agent webhook verification |
+| `K8S_WEBHOOK_SECRET` | — | Bearer token for Kubernetes webhook verification |
 | `LOG_LEVEL` | `info` | Pino log level (`debug`, `info`, `warn`, `error`) |
 
 ## Service graph
@@ -128,6 +134,10 @@ curl -X POST http://localhost:3001/api/v1/graph/import \
 |--------|------|-------------|
 | `POST` | `/api/v1/webhooks/github` | GitHub webhook (deployment, push to main, merged PR) |
 | `POST` | `/api/v1/webhooks/aws` | AWS EventBridge (CodePipeline, ECS, Lambda via CloudTrail) |
+| `POST` | `/api/v1/webhooks/agent` | Coding agent events (Claude Code, Copilot, Cursor, etc.) |
+| `POST` | `/api/v1/webhooks/gitlab` | GitLab webhook (push, merge request, deployment, pipeline) |
+| `POST` | `/api/v1/webhooks/terraform` | Terraform Cloud run notifications |
+| `POST` | `/api/v1/webhooks/kubernetes` | Kubernetes events (from cluster-side agents/controllers) |
 
 ### Health
 
@@ -161,6 +171,23 @@ curl -X POST http://localhost:3001/api/v1/correlate \
   -d '{
     "affected_services": ["api-gateway", "user-service"],
     "window_minutes": 120
+  }'
+```
+
+**Register a coding agent event:**
+
+```bash
+curl -X POST http://localhost:3001/api/v1/webhooks/agent \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "agent": "claude-code",
+    "action": "commit",
+    "service": "user-service",
+    "summary": "Refactored auth token refresh logic",
+    "repository": "team/user-service",
+    "branch": "main",
+    "files_changed": ["src/auth.ts", "src/token.ts"],
+    "confidence": 0.9
   }'
 ```
 

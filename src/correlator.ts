@@ -18,6 +18,7 @@ const CHANGE_TYPE_SCORES: Record<string, number> = {
   feature_flag: 0.8,
   db_migration: 0.85,
   infra_modification: 0.7,
+  code_change: 0.65,
   rollback: 0.6,
   scaling: 0.5,
   security_patch: 0.4,

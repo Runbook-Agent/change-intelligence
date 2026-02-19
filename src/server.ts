@@ -22,6 +22,10 @@ import { velocityRoutes } from './routes/velocity';
 import { graphRoutes } from './routes/graph';
 import { githubWebhookRoutes } from './routes/webhooks/github';
 import { awsWebhookRoutes } from './routes/webhooks/aws';
+import { agentWebhookRoutes } from './routes/webhooks/agent';
+import { gitlabWebhookRoutes } from './routes/webhooks/gitlab';
+import { terraformWebhookRoutes } from './routes/webhooks/terraform';
+import { kubernetesWebhookRoutes } from './routes/webhooks/kubernetes';
 
 // Extend Fastify with our service decorations
 declare module 'fastify' {
@@ -105,6 +109,10 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
   await fastify.register(graphRoutes);
   await fastify.register(githubWebhookRoutes);
   await fastify.register(awsWebhookRoutes);
+  await fastify.register(agentWebhookRoutes);
+  await fastify.register(gitlabWebhookRoutes);
+  await fastify.register(terraformWebhookRoutes);
+  await fastify.register(kubernetesWebhookRoutes);
 
   // Graceful shutdown
   fastify.addHook('onClose', async () => {

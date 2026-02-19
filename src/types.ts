@@ -10,6 +10,7 @@ export type ChangeType =
   | 'infra_modification'
   | 'feature_flag'
   | 'db_migration'
+  | 'code_change'
   | 'rollback'
   | 'scaling'
   | 'security_patch';
@@ -22,6 +23,7 @@ export type ChangeSource =
   | 'aws_lambda'
   | 'kubernetes'
   | 'claude_hook'
+  | 'agent_hook'
   | 'manual'
   | 'terraform';
 

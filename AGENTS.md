@@ -64,12 +64,17 @@ src/
 │   ├── graph.ts        ← Graph import, list, dependencies.
 │   └── webhooks/
 │       ├── github.ts   ← GitHub deployment/push/PR → ChangeEvent
-│       └── aws.ts      ← AWS CodePipeline/ECS/Lambda → ChangeEvent
+│       ├── aws.ts      ← AWS CodePipeline/ECS/Lambda → ChangeEvent
+│       ├── agent.ts    ← Coding agent (Claude Code, Copilot, Cursor) → ChangeEvent
+│       ├── gitlab.ts   ← GitLab push/MR/deployment/pipeline → ChangeEvent
+│       ├── terraform.ts← Terraform Cloud run notifications → ChangeEvent
+│       └── kubernetes.ts← K8s events (forwarded from cluster agents) → ChangeEvent
 └── __tests__/
     ├── store.test.ts        (19 tests)
     ├── correlator.test.ts   (6 tests)
     ├── blast-radius.test.ts (7 tests)
-    └── routes.test.ts       (17 tests)
+    ├── routes.test.ts       (17 tests)
+    └── webhooks.test.ts     (21 tests)
 ```
 
 ## Critical Implementation Details
@@ -121,7 +126,7 @@ When a change event is POSTed to `/api/v1/events`, the server automatically comp
 | Time proximity | 40% | `e^(-t/30)` — exponential decay, half-life ~30min |
 | Service overlap | 35% | Direct match=1.0, 1-hop graph neighbor=0.7, 2-hop=0.4 |
 | Change risk | 15% | Blast radius risk: critical=1.0, high=0.8, medium=0.5, low=0.2 |
-| Change type | 10% | deployment=1.0, config_change=0.9, feature_flag=0.8, db_migration=0.85, infra_modification=0.7, rollback=0.6, scaling=0.5, security_patch=0.4 |
+| Change type | 10% | deployment=1.0, config_change=0.9, feature_flag=0.8, db_migration=0.85, infra_modification=0.7, code_change=0.65, rollback=0.6, scaling=0.5, security_patch=0.4 |
 
 The correlator expands affected services to 2-hop graph neighbors before querying the store. This means a change to service C will still be found if the incident affects service A and A→B→C exists in the graph.
 
@@ -142,8 +147,8 @@ The correlator expands affected services to 2-hop graph neighbors before queryin
 
 ## Domain Types Quick Reference
 
-- **ChangeType:** `deployment`, `config_change`, `infra_modification`, `feature_flag`, `db_migration`, `rollback`, `scaling`, `security_patch`
-- **ChangeSource:** `github`, `gitlab`, `aws_codepipeline`, `aws_ecs`, `aws_lambda`, `kubernetes`, `claude_hook`, `manual`, `terraform`
+- **ChangeType:** `deployment`, `config_change`, `infra_modification`, `feature_flag`, `db_migration`, `code_change`, `rollback`, `scaling`, `security_patch`
+- **ChangeSource:** `github`, `gitlab`, `aws_codepipeline`, `aws_ecs`, `aws_lambda`, `kubernetes`, `claude_hook`, `agent_hook`, `manual`, `terraform`
 - **ChangeInitiator:** `human`, `agent`, `automation`, `unknown`
 - **ChangeStatus:** `in_progress`, `completed`, `failed`, `rolled_back`
 
@@ -181,6 +186,10 @@ FTS5 virtual table `change_events_fts` on `summary` + `service`, kept in sync vi
 | GET | `/graph/suggestions` | Inferred relationships (stub, returns []) |
 | POST | `/webhooks/github` | GitHub webhook |
 | POST | `/webhooks/aws` | AWS EventBridge webhook |
+| POST | `/webhooks/agent` | Coding agent webhook (Claude Code, Copilot, Cursor) |
+| POST | `/webhooks/gitlab` | GitLab webhook (push, MR, deployment, pipeline) |
+| POST | `/webhooks/terraform` | Terraform Cloud run notifications |
+| POST | `/webhooks/kubernetes` | Kubernetes events (forwarded from cluster agents) |
 | GET | `/health` | Health check with store + graph stats |
 
 ## Stubbed Features (Not Yet Implemented)
@@ -189,7 +198,7 @@ These are designed but not built. The endpoints exist and return appropriate stu
 
 1. **Auto-discovery** (`POST /graph/discover`): Should enumerate AWS services (ECS, Lambda, RDS, ElastiCache) and K8s resources, infer dependencies from ALB target groups, security groups, service mesh config.
 2. **Relationship inference** (`GET /graph/suggestions`): Should analyze co-deployment patterns (services deployed within 5min of each other >3 times) and co-failure patterns to suggest graph edges. Inferred edges should carry `metadata.inferred: true` and a confidence score.
-3. **Additional webhooks**: GitLab, Kubernetes admission controllers, Terraform Cloud, PagerDuty.
+3. **Additional webhooks**: PagerDuty.
 4. **Event TTL**: `pruneOlderThan(days)` exists in the store but no cron/scheduler calls it.
 
 ## Common Pitfalls
