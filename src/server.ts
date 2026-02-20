@@ -140,6 +140,13 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
 // CLI entry point
 async function main() {
+  // Check for --mcp flag to start MCP server instead of HTTP
+  if (process.argv.includes('--mcp')) {
+    const { startMcpServer } = await import('./mcp-server');
+    await startMcpServer();
+    return;
+  }
+
   const host = process.env.HOST || '0.0.0.0';
   const port = parseInt(process.env.PORT || '3001', 10);
 
