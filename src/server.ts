@@ -16,6 +16,7 @@ import { BlastRadiusAnalyzer } from './blast-radius';
 import { loadGraphFromYaml, loadGraphFromJson } from './graph-loader';
 
 import { eventsRoutes } from './routes/events';
+import { batchRoutes } from './routes/batch';
 import { correlateRoutes } from './routes/correlate';
 import { blastRadiusRoutes } from './routes/blast-radius';
 import { velocityRoutes } from './routes/velocity';
@@ -103,6 +104,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
 
   // Register routes
   await fastify.register(eventsRoutes);
+  await fastify.register(batchRoutes);
   await fastify.register(correlateRoutes);
   await fastify.register(blastRadiusRoutes);
   await fastify.register(velocityRoutes);
