@@ -6,6 +6,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { unauthorizedError, internalError } from '../../errors';
 
 export async function githubWebhookRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/webhooks/github', async (request, reply) => {
@@ -15,14 +16,14 @@ export async function githubWebhookRoutes(fastify: FastifyInstance): Promise<voi
     if (secret) {
       const signature = request.headers['x-hub-signature-256'] as string | undefined;
       if (!signature) {
-        return reply.status(401).send({ error: 'Missing signature' });
+        return unauthorizedError(reply, 'Missing signature');
       }
 
       const body = JSON.stringify(request.body);
       const expected = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex');
 
       if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
-        return reply.status(401).send({ error: 'Invalid signature' });
+        return unauthorizedError(reply, 'Invalid signature');
       }
     }
 
@@ -38,7 +39,7 @@ export async function githubWebhookRoutes(fastify: FastifyInstance): Promise<voi
       return reply.send({ message: `Ignored event type: ${eventType}` });
     } catch (error) {
       fastify.log.error(error, 'Failed to process GitHub webhook');
-      return reply.status(500).send({ error: 'Failed to process webhook' });
+      return internalError(reply, 'Failed to process GitHub webhook');
     }
   });
 }

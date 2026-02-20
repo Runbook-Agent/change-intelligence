@@ -10,6 +10,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ChangeType } from '../../types';
 import { z } from 'zod';
+import { validationError, unauthorizedError, internalError } from '../../errors';
 
 const K8sPayloadSchema = z.object({
   kind: z.string().min(1),
@@ -37,17 +38,17 @@ export async function kubernetesWebhookRoutes(fastify: FastifyInstance): Promise
     if (secret) {
       const authHeader = request.headers.authorization as string | undefined;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return reply.status(401).send({ error: 'Missing or invalid Authorization header' });
+        return unauthorizedError(reply, 'Missing or invalid Authorization header');
       }
       const token = authHeader.slice(7);
       if (token !== secret) {
-        return reply.status(401).send({ error: 'Invalid token' });
+        return unauthorizedError(reply, 'Invalid token');
       }
     }
 
     const parsed = K8sPayloadSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.issues });
+      return validationError(reply, parsed.error.issues);
     }
 
     const data = parsed.data;
@@ -89,7 +90,7 @@ export async function kubernetesWebhookRoutes(fastify: FastifyInstance): Promise
       return reply.status(201).send({ id: event.id, message: 'Event ingested' });
     } catch (error) {
       fastify.log.error(error, 'Failed to process Kubernetes webhook');
-      return reply.status(500).send({ error: 'Failed to process webhook' });
+      return internalError(reply, 'Failed to process Kubernetes webhook');
     }
   });
 }

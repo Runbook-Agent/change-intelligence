@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { loadGraphFromJson, mergeGraph } from '../graph-loader';
 import { BackstageImportRequestSchema, BackstageApiError, importFromBackstage } from '../backstage-client';
+import { validationError, notFoundError, badGatewayError, internalError, notImplementedError } from '../errors';
 
 export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/v1/graph/import — Import service graph (JSON or config format)
@@ -18,10 +19,7 @@ export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
         stats,
       });
     } catch (error) {
-      return reply.status(400).send({
-        error: 'Failed to import graph',
-        details: error instanceof Error ? error.message : String(error),
-      });
+      return validationError(reply, error instanceof Error ? error.message : String(error));
     }
   });
 
@@ -29,10 +27,7 @@ export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/graph/import/backstage', async (request, reply) => {
     const parsed = BackstageImportRequestSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({
-        error: 'Invalid request body',
-        details: parsed.error.issues,
-      });
+      return validationError(reply, parsed.error.issues);
     }
 
     try {
@@ -48,15 +43,9 @@ export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
       });
     } catch (error) {
       if (error instanceof BackstageApiError) {
-        return reply.status(502).send({
-          error: 'Backstage API error',
-          details: error.message,
-        });
+        return badGatewayError(reply, 'Backstage', error.message);
       }
-      return reply.status(500).send({
-        error: 'Internal error during Backstage import',
-        details: error instanceof Error ? error.message : String(error),
-      });
+      return internalError(reply, error instanceof Error ? error.message : String(error));
     }
   });
 
@@ -78,7 +67,7 @@ export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
     const { service } = request.params as { service: string };
     const node = fastify.serviceGraph.getService(service);
     if (!node) {
-      return reply.status(404).send({ error: `Service '${service}' not found in graph` });
+      return notFoundError(reply, 'Service', service);
     }
 
     const dependencies = fastify.serviceGraph.getDependencies(service).map(s => s.id);
@@ -93,9 +82,7 @@ export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
 
   // POST /api/v1/graph/discover — Auto-discovery stub
   fastify.post('/api/v1/graph/discover', async (_request, reply) => {
-    return reply.status(501).send({
-      message: 'Auto-discovery is not yet implemented. Use POST /api/v1/graph/import to load a graph manually.',
-    });
+    return notImplementedError(reply, 'Auto-discovery', 'Use POST /api/v1/graph/import to load a graph manually.');
   });
 
   // GET /api/v1/graph/suggestions — Inferred relationship suggestions stub

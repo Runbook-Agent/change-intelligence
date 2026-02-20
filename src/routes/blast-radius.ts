@@ -4,6 +4,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { validationError } from '../errors';
 
 const BlastRadiusSchema = z.object({
   services: z.array(z.string()).min(1),
@@ -15,7 +16,7 @@ export async function blastRadiusRoutes(fastify: FastifyInstance): Promise<void>
   fastify.post('/api/v1/blast-radius', async (request, reply) => {
     const parsed = BlastRadiusSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.issues });
+      return validationError(reply, parsed.error.issues);
     }
 
     const { services, change_type, max_depth } = parsed.data;

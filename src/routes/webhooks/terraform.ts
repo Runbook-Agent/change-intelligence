@@ -6,6 +6,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { unauthorizedError, internalError } from '../../errors';
 
 export async function terraformWebhookRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/webhooks/terraform', async (request, reply) => {
@@ -15,14 +16,14 @@ export async function terraformWebhookRoutes(fastify: FastifyInstance): Promise<
     if (secret) {
       const signature = request.headers['x-tfe-notification-signature'] as string | undefined;
       if (!signature) {
-        return reply.status(401).send({ error: 'Missing signature' });
+        return unauthorizedError(reply, 'Missing signature');
       }
 
       const body = JSON.stringify(request.body);
       const expected = createHmac('sha512', secret).update(body).digest('hex');
 
       if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
-        return reply.status(401).send({ error: 'Invalid signature' });
+        return unauthorizedError(reply, 'Invalid signature');
       }
     }
 
@@ -46,7 +47,7 @@ export async function terraformWebhookRoutes(fastify: FastifyInstance): Promise<
       return reply.send({ message: 'Ignored notification' });
     } catch (error) {
       fastify.log.error(error, 'Failed to process Terraform webhook');
-      return reply.status(500).send({ error: 'Failed to process webhook' });
+      return internalError(reply, 'Failed to process Terraform webhook');
     }
   });
 }

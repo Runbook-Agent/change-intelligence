@@ -4,6 +4,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { validationError, notFoundError } from '../errors';
 
 const CreateEventSchema = z.object({
   service: z.string().min(1),
@@ -43,7 +44,7 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/events', async (request, reply) => {
     const parsed = CreateEventSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.issues });
+      return validationError(reply, parsed.error.issues);
     }
 
     const store = fastify.store;
@@ -91,7 +92,7 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const event = fastify.store.get(id);
     if (!event) {
-      return reply.status(404).send({ error: 'Event not found' });
+      return notFoundError(reply, 'Event', id);
     }
     return reply.send(event);
   });
@@ -101,12 +102,12 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const parsed = UpdateEventSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.issues });
+      return validationError(reply, parsed.error.issues);
     }
 
     const updated = fastify.store.update(id, parsed.data);
     if (!updated) {
-      return reply.status(404).send({ error: 'Event not found' });
+      return notFoundError(reply, 'Event', id);
     }
     return reply.send(updated);
   });
@@ -116,7 +117,7 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const deleted = fastify.store.delete(id);
     if (!deleted) {
-      return reply.status(404).send({ error: 'Event not found' });
+      return notFoundError(reply, 'Event', id);
     }
     return reply.status(204).send();
   });

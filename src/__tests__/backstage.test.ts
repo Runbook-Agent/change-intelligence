@@ -349,7 +349,7 @@ describe('POST /api/v1/graph/import/backstage', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe('Invalid request body');
+    expect(res.json().error).toBe('validation_error');
   });
 
   it('returns 400 for invalid base_url', async () => {
@@ -380,7 +380,7 @@ describe('POST /api/v1/graph/import/backstage', () => {
     });
 
     expect(res.statusCode).toBe(502);
-    expect(res.json().error).toBe('Backstage API error');
+    expect(res.json().error).toBe('bad_gateway');
   });
 
   it('handles pagination across multiple pages', async () => {

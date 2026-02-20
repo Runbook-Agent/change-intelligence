@@ -81,13 +81,17 @@ describe('Webhooks', () => {
       expect(data.initiatorIdentity).toBe('copilot');
     });
 
-    it('returns 400 for invalid payload', async () => {
+    it('returns 400 with structured error for invalid payload', async () => {
       const res = await server.inject({
         method: 'POST',
         url: '/api/v1/webhooks/agent',
         payload: { agent: 'test' }, // missing required fields
       });
       expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.error).toBe('validation_error');
+      expect(body.message).toBeDefined();
+      expect(body.hint).toBeDefined();
     });
 
     it('stores tool_calls in metadata', async () => {
@@ -276,7 +280,7 @@ describe('Webhooks', () => {
       expect(event.json().status).toBe('failed');
     });
 
-    it('rejects invalid token when secret is configured', async () => {
+    it('rejects invalid token with structured error when secret is configured', async () => {
       // Temporarily set the env var
       process.env.GITLAB_WEBHOOK_SECRET = 'my-secret';
       try {
@@ -294,6 +298,10 @@ describe('Webhooks', () => {
           },
         });
         expect(res.statusCode).toBe(401);
+        const body = res.json();
+        expect(body.error).toBe('unauthorized');
+        expect(body.message).toBeDefined();
+        expect(body.hint).toBeDefined();
       } finally {
         delete process.env.GITLAB_WEBHOOK_SECRET;
       }
@@ -458,13 +466,17 @@ describe('Webhooks', () => {
       expect(event.json().changeType).toBe('rollback');
     });
 
-    it('returns 400 for invalid payload', async () => {
+    it('returns 400 with structured error for invalid payload', async () => {
       const res = await server.inject({
         method: 'POST',
         url: '/api/v1/webhooks/kubernetes',
         payload: { kind: 'Deployment' }, // missing required fields
       });
       expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.error).toBe('validation_error');
+      expect(body.message).toBeDefined();
+      expect(body.hint).toBeDefined();
     });
   });
 });

@@ -5,6 +5,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import { unauthorizedError, internalError } from '../../errors';
 
 const MAIN_BRANCHES = ['main', 'master', 'production'];
 
@@ -16,7 +17,7 @@ export async function gitlabWebhookRoutes(fastify: FastifyInstance): Promise<voi
     if (secret) {
       const token = request.headers['x-gitlab-token'] as string | undefined;
       if (!token || token !== secret) {
-        return reply.status(401).send({ error: 'Invalid token' });
+        return unauthorizedError(reply, 'Invalid token');
       }
     }
 
@@ -32,7 +33,7 @@ export async function gitlabWebhookRoutes(fastify: FastifyInstance): Promise<voi
       return reply.send({ message: `Ignored event: ${eventType}` });
     } catch (error) {
       fastify.log.error(error, 'Failed to process GitLab webhook');
-      return reply.status(500).send({ error: 'Failed to process webhook' });
+      return internalError(reply, 'Failed to process GitLab webhook');
     }
   });
 }

@@ -4,6 +4,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { validationError } from '../errors';
 
 const CorrelateSchema = z.object({
   affected_services: z.array(z.string()).min(1),
@@ -17,7 +18,7 @@ export async function correlateRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/correlate', async (request, reply) => {
     const parsed = CorrelateSchema.safeParse(request.body);
     if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.issues });
+      return validationError(reply, parsed.error.issues);
     }
 
     const { affected_services, incident_time, window_minutes, max_results, min_score } = parsed.data;

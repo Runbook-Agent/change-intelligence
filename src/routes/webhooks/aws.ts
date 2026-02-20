@@ -5,6 +5,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import { internalError } from '../../errors';
 
 export async function awsWebhookRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/webhooks/aws', async (request, reply) => {
@@ -21,7 +22,7 @@ export async function awsWebhookRoutes(fastify: FastifyInstance): Promise<void> 
       return reply.send({ message: `Ignored event type: ${detailType}` });
     } catch (error) {
       fastify.log.error(error, 'Failed to process AWS webhook');
-      return reply.status(500).send({ error: 'Failed to process webhook' });
+      return internalError(reply, 'Failed to process AWS webhook');
     }
   });
 }

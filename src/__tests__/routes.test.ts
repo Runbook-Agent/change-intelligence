@@ -77,9 +77,13 @@ describe('Routes', () => {
       expect(res.json().id).toBe(id);
     });
 
-    it('GET returns 404 for non-existent event', async () => {
+    it('GET returns 404 for non-existent event with structured error', async () => {
       const res = await server.inject({ method: 'GET', url: '/api/v1/events/nonexistent' });
       expect(res.statusCode).toBe(404);
+      const body = res.json();
+      expect(body.error).toBe('not_found');
+      expect(body.message).toBeDefined();
+      expect(body.hint).toBeDefined();
     });
 
     it('PATCH updates an event', async () => {
@@ -165,13 +169,17 @@ describe('Routes', () => {
       expect(body.correlations.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('returns 400 for invalid payload', async () => {
+    it('returns 400 with structured error for invalid payload', async () => {
       const res = await server.inject({
         method: 'POST',
         url: '/api/v1/correlate',
         payload: {},
       });
       expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.error).toBe('validation_error');
+      expect(body.message).toBeDefined();
+      expect(body.hint).toBeDefined();
     });
   });
 
@@ -242,9 +250,13 @@ describe('Routes', () => {
       expect(res.json().stats.nodeCount).toBe(3);
     });
 
-    it('POST /api/v1/graph/discover returns 501', async () => {
+    it('POST /api/v1/graph/discover returns 501 with structured error', async () => {
       const res = await server.inject({ method: 'POST', url: '/api/v1/graph/discover' });
       expect(res.statusCode).toBe(501);
+      const body = res.json();
+      expect(body.error).toBe('not_implemented');
+      expect(body.message).toBeDefined();
+      expect(body.hint).toBeDefined();
     });
   });
 });
