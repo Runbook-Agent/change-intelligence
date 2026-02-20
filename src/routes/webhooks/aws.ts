@@ -17,6 +17,7 @@ export async function awsWebhookRoutes(fastify: FastifyInstance): Promise<void> 
       const event = parseAWSEvent(detailType, detail, payload);
       if (event) {
         const stored = fastify.store.insert(event);
+        fastify.webhookDispatcher.dispatch(stored, fastify.log);
         return reply.status(201).send({ id: stored.id, message: 'Event ingested' });
       }
       return reply.send({ message: `Ignored event type: ${detailType}` });

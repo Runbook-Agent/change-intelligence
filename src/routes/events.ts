@@ -66,6 +66,9 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
       event.blastRadius = prediction;
     }
 
+    // Dispatch to registered webhooks
+    fastify.webhookDispatcher.dispatch(event, fastify.log);
+
     return reply.status(201).send(event);
   });
 

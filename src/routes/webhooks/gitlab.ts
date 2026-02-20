@@ -28,6 +28,7 @@ export async function gitlabWebhookRoutes(fastify: FastifyInstance): Promise<voi
       const event = parseGitLabEvent(eventType, payload);
       if (event) {
         const stored = fastify.store.insert(event as any);
+        fastify.webhookDispatcher.dispatch(stored, fastify.log);
         return reply.status(201).send({ id: stored.id, message: 'Event ingested' });
       }
       return reply.send({ message: `Ignored event: ${eventType}` });

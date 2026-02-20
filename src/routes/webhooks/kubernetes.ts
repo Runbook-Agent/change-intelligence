@@ -87,6 +87,9 @@ export async function kubernetesWebhookRoutes(fastify: FastifyInstance): Promise
         metadata,
       });
 
+      // Dispatch to registered webhooks
+      fastify.webhookDispatcher.dispatch(event, fastify.log);
+
       return reply.status(201).send({ id: event.id, message: 'Event ingested' });
     } catch (error) {
       fastify.log.error(error, 'Failed to process Kubernetes webhook');

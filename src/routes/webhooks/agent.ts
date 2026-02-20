@@ -103,6 +103,9 @@ export async function agentWebhookRoutes(fastify: FastifyInstance): Promise<void
         event.blastRadius = prediction;
       }
 
+      // Dispatch to registered webhooks
+      fastify.webhookDispatcher.dispatch(event, fastify.log);
+
       return reply.status(201).send({ id: event.id, message: 'Event ingested' });
     } catch (error) {
       fastify.log.error(error, 'Failed to process agent webhook');

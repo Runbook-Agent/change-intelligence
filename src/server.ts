@@ -14,6 +14,8 @@ import { ServiceGraph, createServiceGraph } from './service-graph';
 import { ChangeCorrelator } from './correlator';
 import { BlastRadiusAnalyzer } from './blast-radius';
 import { loadGraphFromYaml, loadGraphFromJson } from './graph-loader';
+import { WebhookRegistrationStore } from './webhook-store';
+import { WebhookDispatcher } from './webhook-dispatcher';
 
 import { eventsRoutes } from './routes/events';
 import { batchRoutes } from './routes/batch';
@@ -27,6 +29,7 @@ import { agentWebhookRoutes } from './routes/webhooks/agent';
 import { gitlabWebhookRoutes } from './routes/webhooks/gitlab';
 import { terraformWebhookRoutes } from './routes/webhooks/terraform';
 import { kubernetesWebhookRoutes } from './routes/webhooks/kubernetes';
+import { webhookRegistrationRoutes } from './routes/webhook-registrations';
 
 // Extend Fastify with our service decorations
 declare module 'fastify' {
@@ -35,6 +38,8 @@ declare module 'fastify' {
     serviceGraph: ServiceGraph;
     correlator: ChangeCorrelator;
     blastRadiusAnalyzer: BlastRadiusAnalyzer;
+    webhookRegistrationStore: WebhookRegistrationStore;
+    webhookDispatcher: WebhookDispatcher;
   }
 }
 
@@ -74,11 +79,17 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
   const correlator = new ChangeCorrelator(store, graph);
   const analyzer = new BlastRadiusAnalyzer(graph);
 
+  // Initialize webhook registration store + dispatcher
+  const webhookRegistrationStore = new WebhookRegistrationStore(store.getDb());
+  const webhookDispatcher = new WebhookDispatcher(webhookRegistrationStore);
+
   // Decorate Fastify instance
   fastify.decorate('store', store);
   fastify.decorate('serviceGraph', graph);
   fastify.decorate('correlator', correlator);
   fastify.decorate('blastRadiusAnalyzer', analyzer);
+  fastify.decorate('webhookRegistrationStore', webhookRegistrationStore);
+  fastify.decorate('webhookDispatcher', webhookDispatcher);
 
   // CORS
   fastify.addHook('onRequest', async (request, reply) => {
@@ -115,6 +126,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
   await fastify.register(gitlabWebhookRoutes);
   await fastify.register(terraformWebhookRoutes);
   await fastify.register(kubernetesWebhookRoutes);
+  await fastify.register(webhookRegistrationRoutes);
 
   // Graceful shutdown
   fastify.addHook('onClose', async () => {

@@ -72,6 +72,9 @@ export async function batchRoutes(fastify: FastifyInstance): Promise<void> {
           event.blastRadius = prediction;
         }
 
+        // Dispatch to registered webhooks
+        fastify.webhookDispatcher.dispatch(event, fastify.log);
+
         results.push({ index: i, id: event.id, status: 'created', event });
         created++;
       }

@@ -445,6 +445,10 @@ export class ChangeEventStore {
     return { total, byType, bySource, byEnvironment };
   }
 
+  getDb(): Database.Database {
+    return this.db;
+  }
+
   transaction<T>(fn: () => T): T {
     return this.db.transaction(fn)();
   }

@@ -41,6 +41,7 @@ export async function terraformWebhookRoutes(fastify: FastifyInstance): Promise<
 
       if (event) {
         const stored = fastify.store.insert(event as any);
+        fastify.webhookDispatcher.dispatch(stored, fastify.log);
         return reply.status(201).send({ id: stored.id, message: 'Event ingested' });
       }
 
