@@ -30,6 +30,7 @@ import { gitlabWebhookRoutes } from './routes/webhooks/gitlab';
 import { terraformWebhookRoutes } from './routes/webhooks/terraform';
 import { kubernetesWebhookRoutes } from './routes/webhooks/kubernetes';
 import { webhookRegistrationRoutes } from './routes/webhook-registrations';
+import { openapiRoutes } from './routes/openapi';
 
 // Extend Fastify with our service decorations
 declare module 'fastify' {
@@ -127,6 +128,7 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
   await fastify.register(terraformWebhookRoutes);
   await fastify.register(kubernetesWebhookRoutes);
   await fastify.register(webhookRegistrationRoutes);
+  await fastify.register(openapiRoutes);
 
   // Graceful shutdown
   fastify.addHook('onClose', async () => {
