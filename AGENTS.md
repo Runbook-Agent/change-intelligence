@@ -43,39 +43,54 @@ Change Correlator    Blast Radius Analyzer
               (in-memory, loaded from YAML)
 ```
 
-**Stack:** Fastify 5, better-sqlite3, Zod, TypeScript (strict). No external databases, message queues, or cache layers.
+**Stack:** Fastify 5, better-sqlite3, Zod, TypeScript (strict), @modelcontextprotocol/sdk. No external databases, message queues, or cache layers.
 
 ## File Map
 
 ```
 src/
-├── backstage-client.ts ← Backstage catalog client + entity→graph conversion.
-├── types.ts            ← All domain types. THE canonical source of truth.
-├── store.ts            ← SQLite store with FTS5. Pattern: better-sqlite3 + WAL mode.
-├── service-graph.ts    ← In-memory dependency graph. Extracted from CLI's graph-store.ts.
-├── graph-loader.ts     ← YAML/JSON graph loading + graph merge logic.
-├── correlator.ts       ← Incident correlation with weighted scoring.
-├── blast-radius.ts     ← Impact prediction via upstream graph traversal.
-├── server.ts           ← Fastify setup, decorations, entry point.
+├── backstage-client.ts     ← Backstage catalog client + entity→graph conversion.
+├── types.ts                ← All domain types. THE canonical source of truth.
+├── store.ts                ← SQLite store with FTS5. Pattern: better-sqlite3 + WAL mode.
+├── errors.ts               ← Structured error helpers (sendError, validationError, notFoundError, etc.)
+├── service-graph.ts        ← In-memory dependency graph. Extracted from CLI's graph-store.ts.
+├── graph-loader.ts         ← YAML/JSON graph loading + graph merge logic.
+├── correlator.ts           ← Incident correlation with weighted scoring.
+├── blast-radius.ts         ← Impact prediction via upstream graph traversal.
+├── webhook-store.ts        ← Webhook registration persistence (shares SQLite DB).
+├── webhook-dispatcher.ts   ← Async event dispatch to registered webhook URLs.
+├── openapi.ts              ← Hand-crafted OpenAPI 3.1 spec object.
+├── mcp-server.ts           ← MCP server (stdio transport, 6 tools).
+├── server.ts               ← Fastify setup, decorations, entry point. --mcp flag for MCP mode.
 ├── routes/
-│   ├── events.ts       ← CRUD + query for change events.
-│   ├── correlate.ts    ← POST /api/v1/correlate
-│   ├── blast-radius.ts ← POST /api/v1/blast-radius
-│   ├── velocity.ts     ← GET /api/v1/velocity/:service
-│   ├── graph.ts        ← Graph import, list, dependencies, Backstage sync.
+│   ├── events.ts           ← CRUD + query for change events (with idempotency support).
+│   ├── batch.ts            ← POST /api/v1/events/batch (atomic batch ingestion).
+│   ├── correlate.ts        ← POST /api/v1/correlate
+│   ├── blast-radius.ts     ← POST /api/v1/blast-radius
+│   ├── velocity.ts         ← GET /api/v1/velocity/:service
+│   ├── graph.ts            ← Graph import, list, dependencies, Backstage sync.
+│   ├── openapi.ts          ← GET /api/v1/openapi.json
+│   ├── webhook-registrations.ts ← CRUD for webhook subscriptions.
 │   └── webhooks/
-│       ├── github.ts   ← GitHub deployment/push/PR → ChangeEvent
-│       ├── aws.ts      ← AWS CodePipeline/ECS/Lambda → ChangeEvent
-│       ├── agent.ts    ← Coding agent (Claude Code, Copilot, Cursor) → ChangeEvent
-│       ├── gitlab.ts   ← GitLab push/MR/deployment/pipeline → ChangeEvent
-│       ├── terraform.ts← Terraform Cloud run notifications → ChangeEvent
-│       └── kubernetes.ts← K8s events (forwarded from cluster agents) → ChangeEvent
+│       ├── github.ts       ← GitHub deployment/push/PR → ChangeEvent
+│       ├── aws.ts          ← AWS CodePipeline/ECS/Lambda → ChangeEvent
+│       ├── agent.ts        ← Coding agent (Claude Code, Copilot, Cursor) → ChangeEvent
+│       ├── gitlab.ts       ← GitLab push/MR/deployment/pipeline → ChangeEvent
+│       ├── terraform.ts    ← Terraform Cloud run notifications → ChangeEvent
+│       └── kubernetes.ts   ← K8s events (forwarded from cluster agents) → ChangeEvent
 └── __tests__/
-    ├── store.test.ts        (19 tests)
-    ├── correlator.test.ts   (6 tests)
-    ├── blast-radius.test.ts (7 tests)
-    ├── routes.test.ts       (17 tests)
-    └── webhooks.test.ts     (21 tests)
+    ├── store.test.ts              (19 tests)
+    ├── correlator.test.ts         (6 tests)
+    ├── blast-radius.test.ts       (7 tests)
+    ├── routes.test.ts             (17 tests)
+    ├── webhooks.test.ts           (21 tests)
+    ├── backstage.test.ts          (25 tests)
+    ├── errors.test.ts             (8 tests)
+    ├── idempotency.test.ts        (8 tests)
+    ├── batch.test.ts              (6 tests)
+    ├── webhook-registrations.test.ts (7 tests)
+    ├── openapi.test.ts            (5 tests)
+    └── mcp-server.test.ts         (6 tests)
 ```
 
 ## Critical Implementation Details
@@ -110,7 +125,7 @@ In `graph-loader.ts`, `mergeGraph()` gives precedence to config-defined nodes/ed
 
 ### 7. Fastify decorations
 
-The server extends Fastify with four decorations: `store`, `serviceGraph`, `correlator`, `blastRadiusAnalyzer`. All route handlers access these via `fastify.store`, etc. The TypeScript module augmentation is in `server.ts`.
+The server extends Fastify with six decorations: `store`, `serviceGraph`, `correlator`, `blastRadiusAnalyzer`, `webhookRegistrationStore`, `webhookDispatcher`. All route handlers access these via `fastify.store`, etc. The TypeScript module augmentation is in `server.ts`.
 
 ### 8. GitHub webhook verification is optional
 
@@ -119,6 +134,22 @@ If `GITHUB_WEBHOOK_SECRET` is not set, signature verification is skipped entirel
 ### 9. Auto-blast-radius on event creation
 
 When a change event is POSTed to `/api/v1/events`, the server automatically computes blast radius if the service graph has nodes. The prediction is attached to the stored event.
+
+### 10. Structured error responses
+
+All error responses use helpers from `errors.ts` to return a consistent shape: `{ error, message, hint, status, details? }`. The `error` field is a snake_case machine code, `hint` tells agents how to recover. Every route file imports from `../errors` (or `../../errors` for webhooks).
+
+### 11. Idempotent event ingestion
+
+Events support an optional `idempotencyKey` field. The store has a partial unique index on `idempotency_key WHERE idempotency_key IS NOT NULL`. The events route checks `store.getByIdempotencyKey()` before insert and returns 200 (not 201) for duplicates. The schema migration in `store.ts:initSchema()` adds the column via `ALTER TABLE` if missing.
+
+### 12. Webhook dispatch is non-blocking
+
+`WebhookDispatcher.dispatch()` uses `setImmediate()` so it never blocks the HTTP response. The dispatcher silently catches store errors (e.g. during shutdown when DB is closed). Every event creation path (REST, batch, all 6 webhook handlers) calls `fastify.webhookDispatcher.dispatch()`.
+
+### 13. MCP server shares code but not the Fastify instance
+
+`mcp-server.ts` creates its own `ChangeEventStore`, `ServiceGraph`, etc. — it does NOT import from `server.ts`. This keeps the MCP server independent of HTTP. The `--mcp` flag in `main()` dynamically imports `./mcp-server` and calls `startMcpServer()`, then returns early (no HTTP server starts).
 
 ## Correlation Scoring Model
 
@@ -158,7 +189,11 @@ The `agent` initiator is the key differentiator — this service is designed to 
 
 ## Database Schema
 
-Single table `change_events` with indexes on: `timestamp`, `service`, `change_type`, `environment`, `status`, `commit_sha`. JSON columns stored as TEXT: `additional_services`, `files_changed`, `config_keys`, `blast_radius`, `tags`, `metadata`. WAL mode enabled for concurrent reads.
+Two tables in the same SQLite database (WAL mode):
+
+**`change_events`** — indexes on: `timestamp`, `service`, `change_type`, `environment`, `status`, `commit_sha`, `idempotency_key` (partial unique, WHERE NOT NULL). JSON columns stored as TEXT: `additional_services`, `files_changed`, `config_keys`, `blast_radius`, `tags`, `metadata`.
+
+**`webhook_registrations`** — stores registered webhook URLs with filter criteria (services, change_types, environments), optional secret for HMAC signing, and active flag.
 
 FTS5 virtual table `change_events_fts` on `summary` + `service`, kept in sync via triggers.
 
@@ -173,7 +208,8 @@ FTS5 virtual table `change_events_fts` on `summary` + `service`, kept in sync vi
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/events` | Create change event (auto-computes blast radius) |
+| POST | `/events` | Create change event (supports idempotencyKey, auto-computes blast radius) |
+| POST | `/events/batch` | Atomic batch ingestion (up to 1000 events, per-event idempotency) |
 | GET | `/events` | Query with filters (services, change_types, sources, environment, since, until, initiator, status, q, limit) |
 | GET | `/events/:id` | Get by ID |
 | PATCH | `/events/:id` | Update fields |
@@ -193,6 +229,10 @@ FTS5 virtual table `change_events_fts` on `summary` + `service`, kept in sync vi
 | POST | `/webhooks/gitlab` | GitLab webhook (push, MR, deployment, pipeline) |
 | POST | `/webhooks/terraform` | Terraform Cloud run notifications |
 | POST | `/webhooks/kubernetes` | Kubernetes events (forwarded from cluster agents) |
+| POST | `/webhooks/register` | Register a webhook URL for event notifications |
+| GET | `/webhooks/registrations` | List all webhook registrations |
+| DELETE | `/webhooks/registrations/:id` | Remove a webhook registration |
+| GET | `/openapi.json` | OpenAPI 3.1 spec (agent tool discovery) |
 | GET | `/health` | Health check with store + graph stats |
 
 ## Stubbed Features (Not Yet Implemented)
@@ -208,6 +248,8 @@ These are designed but not built. The endpoints exist and return appropriate stu
 
 - **Changing traversal in service-graph.ts?** Update the `hops <= 2` check in `blast-radius.ts` and the hop distance checks in `correlator.ts`.
 - **Adding a new ChangeType or ChangeSource?** Update `types.ts`, the Zod schemas in route handlers, and the `CHANGE_TYPE_SCORES` map in `correlator.ts`.
-- **Adding a new webhook?** Follow the pattern in `routes/webhooks/github.ts`: parse provider payload into a `ChangeEvent`-shaped object, call `fastify.store.insert()`, register the route plugin in `server.ts`.
-- **Modifying the store schema?** Update `initSchema()`, `insert()`, `update()` field map, `rowToEvent()`, and all query methods that reference the changed columns.
+- **Adding a new webhook?** Follow the pattern in `routes/webhooks/github.ts`: parse provider payload into a `ChangeEvent`-shaped object, call `fastify.store.insert()`, call `fastify.webhookDispatcher.dispatch(stored, fastify.log)`, register the route plugin in `server.ts`.
+- **Modifying the store schema?** Update `initSchema()`, `insert()`, `update()` field map, `rowToEvent()`, and all query methods that reference the changed columns. For new columns on existing tables, add a migration check like the `idempotency_key` pattern in `initSchema()`.
+- **Adding a new error response?** Use the helpers in `errors.ts`. Never return raw `{ error: '...' }` objects — always use `validationError()`, `notFoundError()`, etc.
+- **Adding a new endpoint?** Also add it to `openapi.ts` spec and update the MCP server tools in `mcp-server.ts` if relevant.
 - **JSON columns:** `additional_services`, `files_changed`, `config_keys`, `blast_radius`, `tags`, `metadata` are stored as JSON strings. Always `JSON.stringify()` on write, `JSON.parse()` on read. The `rowToEvent()` method handles this.

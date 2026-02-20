@@ -31,9 +31,11 @@ Change Correlator    Blast Radius Analyzer
  graph scoring)        traversal)
 ```
 
-**Stack:** Fastify, better-sqlite3 (FTS5), Zod, TypeScript.
+**Stack:** Fastify, better-sqlite3 (FTS5), Zod, TypeScript, MCP SDK.
 
 No external databases, no message queues, no cache layers — a single binary that starts instantly with a local SQLite file.
+
+**Agent-friendly by design:** Structured error responses with recovery hints, idempotent ingestion, batch endpoints, OpenAPI spec for tool discovery, and a native MCP server for direct AI agent integration.
 
 ## Configuration
 
@@ -104,7 +106,8 @@ curl -X POST http://localhost:3001/api/v1/graph/import \
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/events` | Create a change event |
+| `POST` | `/api/v1/events` | Create a change event (supports `idempotencyKey` for safe retries) |
+| `POST` | `/api/v1/events/batch` | Create up to 1000 events atomically |
 | `GET` | `/api/v1/events` | Query events (filters: `services`, `change_types`, `sources`, `environment`, `since`, `until`, `initiator`, `status`, `q`, `limit`) |
 | `GET` | `/api/v1/events/:id` | Get event by ID |
 | `PATCH` | `/api/v1/events/:id` | Update event |
@@ -140,10 +143,19 @@ curl -X POST http://localhost:3001/api/v1/graph/import \
 | `POST` | `/api/v1/webhooks/terraform` | Terraform Cloud run notifications |
 | `POST` | `/api/v1/webhooks/kubernetes` | Kubernetes events (from cluster-side agents/controllers) |
 
-### Health
+### Webhook Registrations
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `POST` | `/api/v1/webhooks/register` | Register a URL to receive event notifications |
+| `GET` | `/api/v1/webhooks/registrations` | List all webhook registrations |
+| `DELETE` | `/api/v1/webhooks/registrations/:id` | Remove a webhook registration |
+
+### Discovery
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/openapi.json` | OpenAPI 3.1 spec (for agent tool discovery) |
 | `GET` | `/api/v1/health` | Health check with store and graph stats |
 
 ## Examples
@@ -218,6 +230,54 @@ curl -X POST http://localhost:3001/api/v1/blast-radius \
   }'
 ```
 
+**Create event with idempotency (safe to retry):**
+
+```bash
+curl -X POST http://localhost:3001/api/v1/events \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "service": "api",
+    "changeType": "deployment",
+    "summary": "Deploy v2.3.1",
+    "idempotencyKey": "deploy-api-v2.3.1"
+  }'
+# First call → 201 Created
+# Retry same key → 200 OK (returns existing event)
+```
+
+**Batch ingest multiple events:**
+
+```bash
+curl -X POST http://localhost:3001/api/v1/events/batch \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "events": [
+      { "service": "api", "changeType": "deployment", "summary": "Deploy API v2.0" },
+      { "service": "worker", "changeType": "deployment", "summary": "Deploy Worker v1.5" },
+      { "service": "api", "changeType": "config_change", "summary": "Update rate limits" }
+    ]
+  }'
+```
+
+**Register a webhook to receive event notifications:**
+
+```bash
+curl -X POST http://localhost:3001/api/v1/webhooks/register \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://your-service.example.com/change-events",
+    "secret": "your-hmac-secret",
+    "services": ["api", "worker"],
+    "changeTypes": ["deployment"]
+  }'
+```
+
+**Discover the API programmatically:**
+
+```bash
+curl http://localhost:3001/api/v1/openapi.json
+```
+
 ## Correlation scoring model
 
 When correlating changes with an incident, each change is scored on four dimensions:
@@ -228,6 +288,55 @@ When correlating changes with an incident, each change is scored on four dimensi
 | Service overlap | 35% | Direct match = 1.0, 1-hop graph neighbor = 0.7, 2-hop = 0.4 |
 | Change risk | 15% | Blast radius risk level: critical = 1.0, high = 0.8, medium = 0.5, low = 0.2 |
 | Change type | 10% | deployment = 1.0, config_change = 0.9, feature_flag = 0.8, ... |
+
+## MCP Server (Model Context Protocol)
+
+The service includes a native MCP server for direct integration with AI agents like Claude Code:
+
+```bash
+npm run mcp
+# or: tsx src/server.ts --mcp
+```
+
+This starts a stdio-based MCP server exposing 6 tools:
+
+| Tool | Description |
+|------|-------------|
+| `query_change_events` | Query events with filters (services, types, environment, time window, full-text search) |
+| `correlate_changes` | Correlate changes with an incident (affected services + time) |
+| `predict_blast_radius` | Predict impact of a change using the service dependency graph |
+| `get_change_velocity` | Change frequency metrics for a service (single window or trend) |
+| `import_graph` | Import a service dependency graph from JSON |
+| `list_services` | List all services in the dependency graph |
+
+**Claude Code configuration** (`~/.claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "change-intelligence": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/change-intelligence/src/server.ts", "--mcp"]
+    }
+  }
+}
+```
+
+## Structured Error Responses
+
+All error responses return a consistent, agent-friendly format:
+
+```json
+{
+  "error": "validation_error",
+  "message": "Request body failed validation.",
+  "hint": "Check the details array for specific field errors and correct the request.",
+  "status": 400,
+  "details": [...]
+}
+```
+
+Error codes: `validation_error`, `not_found`, `unauthorized`, `internal_error`, `bad_gateway`, `not_implemented`.
 
 ## [RunbookAI](https://github.com/Runbook-Agent/RunbookAI) CLI integration
 
@@ -250,6 +359,7 @@ This unlocks:
 
 ```bash
 npm run dev          # Start with hot reload
+npm run mcp          # Start MCP server (stdio transport)
 npm test             # Run tests (vitest)
 npm run test:watch   # Watch mode
 npm run typecheck    # Type checking
