@@ -84,6 +84,23 @@ export class ChangeEventStore {
         VALUES (NEW.rowid, NEW.summary, NEW.service);
       END;
     `);
+
+    // Schema migration: add idempotency_key column if missing
+    const columns = this.db.prepare("PRAGMA table_info(change_events)").all() as { name: string }[];
+    const hasIdempotencyKey = columns.some(c => c.name === 'idempotency_key');
+    if (!hasIdempotencyKey) {
+      this.db.exec(`ALTER TABLE change_events ADD COLUMN idempotency_key TEXT`);
+    }
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_idempotency_key
+      ON change_events(idempotency_key) WHERE idempotency_key IS NOT NULL
+    `);
+  }
+
+  getByIdempotencyKey(key: string): ChangeEvent | null {
+    const row = this.db.prepare('SELECT * FROM change_events WHERE idempotency_key = ?').get(key) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return this.rowToEvent(row);
   }
 
   insert(event: Partial<ChangeEvent> & { service: string; changeType: string; summary: string }): ChangeEvent {
@@ -113,6 +130,7 @@ export class ChangeEventStore {
       previousVersion: event.previousVersion,
       newVersion: event.newVersion,
       blastRadius: event.blastRadius,
+      idempotencyKey: event.idempotencyKey,
       tags: event.tags || [],
       metadata: event.metadata || {},
       createdAt: event.createdAt || now,
@@ -124,8 +142,9 @@ export class ChangeEventStore {
       (id, timestamp, service, additional_services, change_type, source, initiator,
        initiator_identity, status, environment, commit_sha, pr_number, pr_url,
        repository, branch, summary, diff, files_changed, config_keys,
-       previous_version, new_version, blast_radius, tags, metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       previous_version, new_version, blast_radius, tags, metadata, created_at, updated_at,
+       idempotency_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -155,6 +174,7 @@ export class ChangeEventStore {
       JSON.stringify(full.metadata),
       full.createdAt,
       full.updatedAt,
+      full.idempotencyKey || null,
     );
 
     return full;
@@ -453,6 +473,7 @@ export class ChangeEventStore {
       previousVersion: row.previous_version as string | undefined,
       newVersion: row.new_version as string | undefined,
       blastRadius: row.blast_radius ? JSON.parse(row.blast_radius as string) : undefined,
+      idempotencyKey: row.idempotency_key as string | undefined,
       tags: JSON.parse((row.tags as string) || '[]'),
       metadata: JSON.parse((row.metadata as string) || '{}'),
       createdAt: row.created_at as string,

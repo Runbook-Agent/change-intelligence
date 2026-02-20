@@ -53,6 +53,7 @@ export interface ChangeEvent {
   previousVersion?: string;
   newVersion?: string;
   blastRadius?: BlastRadiusPrediction;
+  idempotencyKey?: string;
   tags: string[];
   metadata: Record<string, unknown>;
   createdAt: string;

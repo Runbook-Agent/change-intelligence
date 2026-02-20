@@ -29,6 +29,7 @@ const CreateEventSchema = z.object({
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
   timestamp: z.string().optional(),
+  idempotencyKey: z.string().optional(),
 });
 
 const UpdateEventSchema = z.object({
@@ -48,6 +49,13 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     const store = fastify.store;
+
+    // Idempotency check: return existing event if key matches
+    if (parsed.data.idempotencyKey) {
+      const existing = store.getByIdempotencyKey(parsed.data.idempotencyKey);
+      if (existing) return reply.status(200).send(existing);
+    }
+
     const event = store.insert(parsed.data);
 
     // Optionally compute blast radius if graph is available
