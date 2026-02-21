@@ -1,16 +1,18 @@
 /**
- * ChangeCorrelator — Correlates change events with incidents
+ * ChangeCorrelator — Correlates change events with incidents.
  *
  * Scoring model:
- * - Time proximity (40%): exponential decay, half-life ~30min
- * - Service overlap (35%): direct=1.0, 1-hop neighbor=0.7, 2-hop=0.4
+ * - Time proximity (35%): exponential decay, half-life ~30min
+ * - Service overlap (30%): direct=1.0, 1-hop neighbor=0.7, 2-hop=0.4
  * - Change risk (15%): blast radius risk level
  * - Change type (10%): deployment=1.0, config=0.9, etc.
+ * - Environment match (10%): same env=1.0, unknown=0.5, mismatch=0.2
  */
 
-import type { ChangeCorrelation, ChangeEvent } from './types';
+import type { ChangeCorrelation, ChangeEvent, ConfidenceBreakdown, EvidenceLink } from './types';
 import type { ChangeEventStore } from './store';
 import type { ServiceGraph } from './service-graph';
+import { extractEventEvidence } from './provenance';
 
 const CHANGE_TYPE_SCORES: Record<string, number> = {
   deployment: 1.0,
@@ -31,6 +33,28 @@ const RISK_SCORES: Record<string, number> = {
   low: 0.2,
 };
 
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function dedupeEvidence(evidence: EvidenceLink[]): EvidenceLink[] {
+  const seen = new Set<string>();
+  const result: EvidenceLink[] = [];
+
+  for (const item of evidence) {
+    const key = `${item.type}|${item.url || ''}|${item.label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result;
+}
+
 export class ChangeCorrelator {
   constructor(
     private store: ChangeEventStore,
@@ -44,6 +68,7 @@ export class ChangeCorrelator {
       windowMinutes?: number;
       maxResults?: number;
       minScore?: number;
+      incidentEnvironment?: string;
     }
   ): ChangeCorrelation[] {
     const windowMinutes = options?.windowMinutes ?? 120;
@@ -55,29 +80,38 @@ export class ChangeCorrelator {
     const expandedServices = this.expandServices(affectedServices);
 
     // Get recent changes for all relevant services
-    const changes = this.store.getRecentForServices(
-      Array.from(expandedServices.keys()),
-      windowMinutes
-    );
+    const changes = expandedServices.size === 0
+      ? this.store.query({
+          since: new Date(Date.now() - windowMinutes * 60_000).toISOString(),
+          limit: 200,
+        })
+      : this.store.getRecentForServices(
+          Array.from(expandedServices.keys()),
+          windowMinutes
+        );
 
     // Score each change
     const correlations: ChangeCorrelation[] = [];
 
     for (const change of changes) {
-      const { score, reasons, serviceOverlap, timeDelta } = this.scoreChange(
+      const scored = this.scoreChange(
         change,
         affectedServices,
         expandedServices,
-        incidentTimestamp
+        incidentTimestamp,
+        options?.incidentEnvironment
       );
 
-      if (score >= minScore) {
+      if (scored.score >= minScore) {
         correlations.push({
           changeEvent: change,
-          correlationScore: Math.round(score * 1000) / 1000,
-          correlationReasons: reasons,
-          serviceOverlap,
-          timeDeltaMinutes: Math.round(timeDelta * 10) / 10,
+          correlationScore: round(scored.score),
+          correlationReasons: unique(scored.reasons),
+          whyRelevant: unique(scored.reasons),
+          serviceOverlap: unique(scored.serviceOverlap),
+          timeDeltaMinutes: Math.round(scored.timeDelta * 10) / 10,
+          confidence: scored.confidence,
+          evidence: dedupeEvidence(scored.evidence).slice(0, 20),
         });
       }
     }
@@ -132,27 +166,31 @@ export class ChangeCorrelator {
     change: ChangeEvent,
     directServices: string[],
     expandedServices: Map<string, number>,
-    incidentTimestamp: number
+    incidentTimestamp: number,
+    incidentEnvironment?: string
   ): {
     score: number;
     reasons: string[];
     serviceOverlap: string[];
     timeDelta: number;
+    confidence: ConfidenceBreakdown;
+    evidence: EvidenceLink[];
   } {
     const reasons: string[] = [];
     const serviceOverlap: string[] = [];
+    const evidence: EvidenceLink[] = extractEventEvidence(change);
 
-    // Time proximity (40%)
+    // Time proximity (35%)
     const changeTimestamp = new Date(change.timestamp).getTime();
     const timeDeltaMinutes = Math.abs(incidentTimestamp - changeTimestamp) / 60_000;
     const timeScore = Math.exp(-timeDeltaMinutes / 30);
     if (timeDeltaMinutes < 15) {
-      reasons.push(`Very recent change (${Math.round(timeDeltaMinutes)}min ago)`);
+      reasons.push(`Very recent change (${Math.round(timeDeltaMinutes)}min from incident)`);
     } else if (timeDeltaMinutes < 60) {
-      reasons.push(`Recent change (${Math.round(timeDeltaMinutes)}min ago)`);
+      reasons.push(`Recent change (${Math.round(timeDeltaMinutes)}min from incident)`);
     }
 
-    // Service overlap (35%)
+    // Service overlap (30%)
     let serviceScore = 0;
     const allChangeServices = [change.service, ...(change.additionalServices || [])];
 
@@ -172,6 +210,22 @@ export class ChangeCorrelator {
           serviceOverlap.push(svc);
           reasons.push(`2-hop graph neighbor: ${svc}`);
         }
+
+        if (hops !== undefined && hops > 0) {
+          const path = this.findShortestPath(directServices, svc);
+          if (path) {
+            evidence.push({
+              type: 'graph_path',
+              label: `Graph adjacency path (${path.length - 1} hop): ${path.join(' -> ')}`,
+              source: 'service_graph',
+              eventId: change.id,
+              details: {
+                path,
+                hops: path.length - 1,
+              },
+            });
+          }
+        }
       }
     }
 
@@ -179,7 +233,7 @@ export class ChangeCorrelator {
     const riskLevel = change.blastRadius?.riskLevel || 'low';
     const riskScore = RISK_SCORES[riskLevel] || 0.2;
     if (riskLevel === 'critical' || riskLevel === 'high') {
-      reasons.push(`${riskLevel} risk change`);
+      reasons.push(`${riskLevel} blast-radius risk`);
     }
 
     // Change type (10%)
@@ -188,13 +242,71 @@ export class ChangeCorrelator {
       reasons.push(`High-impact change type: ${change.changeType}`);
     }
 
+    // Environment match (10%)
+    const environmentScore = this.getEnvironmentScore(
+      change.environment,
+      incidentEnvironment,
+      reasons
+    );
+
     // Weighted sum
     const score =
-      timeScore * 0.4 +
-      serviceScore * 0.35 +
+      timeScore * 0.35 +
+      serviceScore * 0.30 +
       riskScore * 0.15 +
-      typeScore * 0.1;
+      typeScore * 0.10 +
+      environmentScore * 0.10;
 
-    return { score, reasons, serviceOverlap, timeDelta: timeDeltaMinutes };
+    return {
+      score,
+      reasons,
+      serviceOverlap,
+      timeDelta: timeDeltaMinutes,
+      confidence: {
+        overall: round(score),
+        factors: {
+          timeProximity: round(timeScore),
+          serviceAdjacency: round(serviceScore),
+          changeRisk: round(riskScore),
+          changeType: round(typeScore),
+          environmentMatch: round(environmentScore),
+        },
+      },
+      evidence,
+    };
+  }
+
+  private getEnvironmentScore(
+    eventEnvironment: string,
+    incidentEnvironment: string | undefined,
+    reasons: string[]
+  ): number {
+    if (!incidentEnvironment) return 0.5;
+
+    if (eventEnvironment === incidentEnvironment) {
+      reasons.push(`Environment match: ${eventEnvironment}`);
+      return 1;
+    }
+
+    reasons.push(`Environment mismatch (event=${eventEnvironment}, incident=${incidentEnvironment})`);
+    return 0.2;
+  }
+
+  private findShortestPath(startServices: string[], target: string): string[] | null {
+    let bestPath: string[] | null = null;
+
+    for (const start of startServices) {
+      const directPath = this.graph.findPath(start, target);
+      if (directPath && (!bestPath || directPath.length < bestPath.length)) {
+        bestPath = directPath;
+      }
+
+      const reversePath = this.graph.findPath(target, start);
+      if (reversePath && (!bestPath || reversePath.length < bestPath.length)) {
+        bestPath = reversePath;
+      }
+    }
+
+    return bestPath;
   }
 }

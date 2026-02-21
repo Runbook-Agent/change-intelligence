@@ -8,13 +8,34 @@ import { validationError, notFoundError } from '../errors';
 
 const CreateEventSchema = z.object({
   service: z.string().min(1),
-  changeType: z.string().default('deployment'),
+  changeType: z.enum([
+    'deployment',
+    'config_change',
+    'infra_modification',
+    'feature_flag',
+    'db_migration',
+    'code_change',
+    'rollback',
+    'scaling',
+    'security_patch',
+  ]).default('deployment'),
   summary: z.string().min(1),
   additionalServices: z.array(z.string()).optional(),
-  source: z.string().optional(),
-  initiator: z.string().optional(),
+  source: z.enum([
+    'github',
+    'gitlab',
+    'aws_codepipeline',
+    'aws_ecs',
+    'aws_lambda',
+    'kubernetes',
+    'claude_hook',
+    'agent_hook',
+    'manual',
+    'terraform',
+  ]).optional(),
+  initiator: z.enum(['human', 'agent', 'automation', 'unknown']).optional(),
   initiatorIdentity: z.string().optional(),
-  status: z.string().optional(),
+  status: z.enum(['in_progress', 'completed', 'failed', 'rolled_back']).optional(),
   environment: z.string().optional(),
   commitSha: z.string().optional(),
   prNumber: z.string().optional(),
@@ -24,6 +45,12 @@ const CreateEventSchema = z.object({
   diff: z.string().optional(),
   filesChanged: z.array(z.string()).optional(),
   configKeys: z.array(z.string()).optional(),
+  authorType: z.enum(['human', 'ai_assisted', 'autonomous_agent']).optional(),
+  reviewModel: z.string().optional(),
+  humanReviewCount: z.number().int().min(0).optional(),
+  testSignal: z.enum(['passed', 'failed', 'partial', 'unknown']).optional(),
+  changeSetId: z.string().optional(),
+  canonicalUrl: z.string().url().optional(),
   previousVersion: z.string().optional(),
   newVersion: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -33,11 +60,17 @@ const CreateEventSchema = z.object({
 });
 
 const UpdateEventSchema = z.object({
-  status: z.string().optional(),
+  status: z.enum(['in_progress', 'completed', 'failed', 'rolled_back']).optional(),
   summary: z.string().optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
   blastRadius: z.unknown().optional(),
+  authorType: z.enum(['human', 'ai_assisted', 'autonomous_agent']).optional(),
+  reviewModel: z.string().optional(),
+  humanReviewCount: z.number().int().min(0).optional(),
+  testSignal: z.enum(['passed', 'failed', 'partial', 'unknown']).optional(),
+  changeSetId: z.string().optional(),
+  canonicalUrl: z.string().url().optional(),
 }).passthrough();
 
 export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -85,6 +118,7 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
       until: query.until,
       initiator: query.initiator as import('../types').ChangeInitiator | undefined,
       status: query.status as import('../types').ChangeStatus | undefined,
+      changeSetIds: query.change_set_ids?.split(',').filter(Boolean),
       query: query.q,
       limit: query.limit ? parseInt(query.limit, 10) : undefined,
     };
@@ -116,7 +150,10 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
       return validationError(reply, parsed.error.issues);
     }
 
-    const updated = fastify.store.update(id, parsed.data);
+    const updated = fastify.store.update(
+      id,
+      parsed.data as Partial<import('../types').ChangeEvent>
+    );
     if (!updated) {
       return notFoundError(reply, 'Event', id);
     }

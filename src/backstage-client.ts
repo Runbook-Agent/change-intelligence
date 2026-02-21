@@ -304,6 +304,9 @@ export function convertEntitiesToGraphConfig(
         target: targetId,
         type: inferEdgeType(ref),
         criticality: 'degraded',
+        edge_source: 'backstage',
+        confidence: 0.85,
+        last_seen: new Date().toISOString(),
         metadata: { backstage_ref: ref },
       });
     }
@@ -327,6 +330,9 @@ export function convertEntitiesToGraphConfig(
         target: providerId,
         type: 'sync',
         criticality: 'degraded',
+        edge_source: 'backstage',
+        confidence: 0.75,
+        last_seen: new Date().toISOString(),
         metadata: { backstage_api_ref: apiRef },
       });
     }

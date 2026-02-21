@@ -5,7 +5,10 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import type { ChangeEventStore } from '../../store';
 import { internalError } from '../../errors';
+
+type ParsedEvent = Parameters<ChangeEventStore['insert']>[0];
 
 export async function awsWebhookRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/webhooks/aws', async (request, reply) => {
@@ -32,7 +35,7 @@ function parseAWSEvent(
   detailType: string,
   detail: Record<string, unknown>,
   envelope: Record<string, unknown>
-): Record<string, unknown> | null {
+): ParsedEvent | null {
   switch (detailType) {
     case 'CodePipeline Pipeline Execution State Change':
       return parseCodePipelineEvent(detail, envelope);
@@ -49,7 +52,7 @@ function parseAWSEvent(
 function parseCodePipelineEvent(
   detail: Record<string, unknown>,
   envelope: Record<string, unknown>
-): Record<string, unknown> {
+): ParsedEvent {
   const pipeline = detail.pipeline as string || 'unknown';
   const state = detail.state as string;
 
@@ -74,7 +77,7 @@ function parseECSEvent(
   detailType: string,
   detail: Record<string, unknown>,
   envelope: Record<string, unknown>
-): Record<string, unknown> {
+): ParsedEvent {
   const clusterArn = detail.clusterArn as string || '';
   const group = detail.group as string || '';
   const serviceName = extractServiceNameFromArn(clusterArn) || group.replace('service:', '') || 'unknown';
@@ -102,7 +105,7 @@ function parseECSEvent(
 function parseCloudTrailEvent(
   detail: Record<string, unknown>,
   envelope: Record<string, unknown>
-): Record<string, unknown> | null {
+): ParsedEvent | null {
   const eventName = detail.eventName as string;
   const eventSource = detail.eventSource as string;
 

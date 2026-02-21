@@ -19,6 +19,17 @@ export interface ServiceNode {
   updatedAt: Date;
 }
 
+export type EdgeSource =
+  | 'config'
+  | 'manual'
+  | 'backstage'
+  | 'otel'
+  | 'kube-labels'
+  | 'inferred'
+  | 'discovered'
+  | 'import'
+  | 'mcp-import';
+
 export interface DependencyEdge {
   id: string;
   source: string;
@@ -26,6 +37,9 @@ export interface DependencyEdge {
   type: 'sync' | 'async' | 'database' | 'cache' | 'queue' | 'external';
   protocol?: string;
   criticality: 'critical' | 'degraded' | 'optional';
+  edgeSource?: EdgeSource;
+  confidence?: number;
+  lastSeen?: string;
   description?: string;
   metadata: Record<string, unknown>;
 }
@@ -36,6 +50,8 @@ export interface ImpactPath {
   path: string[];
   hops: number;
   criticality: 'critical' | 'degraded' | 'optional';
+  confidence: number;
+  edgeSources: EdgeSource[];
 }
 
 export interface GraphStats {
@@ -90,7 +106,13 @@ export class ServiceGraph {
 
   addDependency(edge: Omit<DependencyEdge, 'id'>): DependencyEdge {
     const id = `${edge.source}->${edge.target}`;
-    const fullEdge: DependencyEdge = { ...edge, id };
+    const fullEdge: DependencyEdge = {
+      ...edge,
+      id,
+      edgeSource: edge.edgeSource || this.inferEdgeSource(edge.metadata),
+      confidence: this.normalizeConfidence(edge.confidence),
+      lastSeen: edge.lastSeen || new Date().toISOString(),
+    };
     this.edges.set(id, fullEdge);
     if (!this.outgoing.has(edge.source)) this.outgoing.set(edge.source, new Set());
     this.outgoing.get(edge.source)!.add(id);
@@ -133,6 +155,26 @@ export class ServiceGraph {
     return Array.from(this.edges.values());
   }
 
+  getOutgoingEdges(serviceId: string): DependencyEdge[] {
+    const edgeIds = this.outgoing.get(serviceId) || new Set<string>();
+    const edges: DependencyEdge[] = [];
+    for (const edgeId of edgeIds) {
+      const edge = this.edges.get(edgeId);
+      if (edge) edges.push(edge);
+    }
+    return edges;
+  }
+
+  getIncomingEdges(serviceId: string): DependencyEdge[] {
+    const edgeIds = this.incoming.get(serviceId) || new Set<string>();
+    const edges: DependencyEdge[] = [];
+    for (const edgeId of edgeIds) {
+      const edge = this.edges.get(edgeId);
+      if (edge) edges.push(edge);
+    }
+    return edges;
+  }
+
   searchServices(query: string): ServiceNode[] {
     const lowerQuery = query.toLowerCase();
     return Array.from(this.nodes.values()).filter(
@@ -156,7 +198,9 @@ export class ServiceGraph {
       current: string,
       path: string[],
       depth: number,
-      criticality: 'critical' | 'degraded' | 'optional'
+      criticality: 'critical' | 'degraded' | 'optional',
+      confidence: number,
+      edgeSources: EdgeSource[]
     ) => {
       if (depth > maxDepth || visited.has(current)) return;
       visited.add(current);
@@ -167,18 +211,25 @@ export class ServiceGraph {
         if (!edge) continue;
         const newPath = [...path, edge.source];
         const newCriticality = this.mergeCriticality(criticality, edge.criticality);
+        const newConfidence = Math.min(confidence, this.normalizeConfidence(edge.confidence));
+        const newEdgeSources = Array.from(new Set([
+          ...edgeSources,
+          edge.edgeSource || this.inferEdgeSource(edge.metadata),
+        ]));
         paths.push({
           source: serviceId,
           affected: edge.source,
           path: newPath,
           hops: newPath.length,
           criticality: newCriticality,
+          confidence: newConfidence,
+          edgeSources: newEdgeSources,
         });
-        traverse(edge.source, newPath, depth + 1, newCriticality);
+        traverse(edge.source, newPath, depth + 1, newCriticality, newConfidence, newEdgeSources);
       }
     };
 
-    traverse(serviceId, [serviceId], 0, 'critical');
+    traverse(serviceId, [serviceId], 0, 'critical', 1, []);
     return paths.sort((a, b) => a.hops - b.hops);
   }
 
@@ -193,7 +244,9 @@ export class ServiceGraph {
       current: string,
       path: string[],
       depth: number,
-      criticality: 'critical' | 'degraded' | 'optional'
+      criticality: 'critical' | 'degraded' | 'optional',
+      confidence: number,
+      edgeSources: EdgeSource[]
     ) => {
       if (depth > maxDepth || visited.has(current)) return;
       visited.add(current);
@@ -204,18 +257,25 @@ export class ServiceGraph {
         if (!edge) continue;
         const newPath = [...path, edge.target];
         const newCriticality = this.mergeCriticality(criticality, edge.criticality);
+        const newConfidence = Math.min(confidence, this.normalizeConfidence(edge.confidence));
+        const newEdgeSources = Array.from(new Set([
+          ...edgeSources,
+          edge.edgeSource || this.inferEdgeSource(edge.metadata),
+        ]));
         paths.push({
           source: serviceId,
           affected: edge.target,
           path: newPath,
           hops: newPath.length,
           criticality: newCriticality,
+          confidence: newConfidence,
+          edgeSources: newEdgeSources,
         });
-        traverse(edge.target, newPath, depth + 1, newCriticality);
+        traverse(edge.target, newPath, depth + 1, newCriticality, newConfidence, newEdgeSources);
       }
     };
 
-    traverse(serviceId, [serviceId], 0, 'critical');
+    traverse(serviceId, [serviceId], 0, 'critical', 1, []);
     return paths.sort((a, b) => a.hops - b.hops);
   }
 
@@ -305,6 +365,29 @@ export class ServiceGraph {
     // Weakest-link: path criticality is the least critical edge along it
     const order = { critical: 0, degraded: 1, optional: 2 };
     return order[a] >= order[b] ? a : b;
+  }
+
+  private normalizeConfidence(confidence: number | undefined): number {
+    if (typeof confidence !== 'number' || Number.isNaN(confidence)) return 1;
+    return Math.max(0, Math.min(1, confidence));
+  }
+
+  private inferEdgeSource(metadata: Record<string, unknown>): EdgeSource {
+    const source = metadata?.source;
+    if (
+      source === 'config' ||
+      source === 'manual' ||
+      source === 'backstage' ||
+      source === 'otel' ||
+      source === 'kube-labels' ||
+      source === 'inferred' ||
+      source === 'discovered' ||
+      source === 'import' ||
+      source === 'mcp-import'
+    ) {
+      return source;
+    }
+    return 'manual';
   }
 }
 

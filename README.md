@@ -1,6 +1,6 @@
 # Change Intelligence Service
 
-A standalone service that ingests change events (deployments, config changes, infra modifications) via webhooks and a REST API, then provides **change correlation** and **blast radius analysis** for incident triage.
+A standalone service that ingests change events (deployments, config changes, infra modifications) via webhooks and a REST API, then answers incident triage questions with **evidence-first correlation**, **change-set grouping**, and **blast radius analysis**.
 
 Designed as an optional companion to [RunbookAI](https://github.com/Runbook-Agent/RunbookAI) — if configured, the CLI gains "what changed recently?" during investigations. If not configured, everything still works.
 
@@ -85,11 +85,15 @@ dependencies:
     target: user-service
     type: sync
     criticality: critical
+    edge_source: config
+    confidence: 1.0
 
   - source: user-service
     target: users-db
     type: database
     criticality: critical
+    edge_source: config
+    confidence: 1.0
 ```
 
 Load on startup with `CHANGE_INTEL_GRAPH_PATH=graph.yaml`, or import at runtime:
@@ -108,7 +112,7 @@ curl -X POST http://localhost:3001/api/v1/graph/import \
 |--------|------|-------------|
 | `POST` | `/api/v1/events` | Create a change event (supports `idempotencyKey` for safe retries) |
 | `POST` | `/api/v1/events/batch` | Create up to 1000 events atomically |
-| `GET` | `/api/v1/events` | Query events (filters: `services`, `change_types`, `sources`, `environment`, `since`, `until`, `initiator`, `status`, `q`, `limit`) |
+| `GET` | `/api/v1/events` | Query events (filters: `services`, `change_types`, `sources`, `environment`, `since`, `until`, `initiator`, `status`, `change_set_ids`, `q`, `limit`) |
 | `GET` | `/api/v1/events/:id` | Get event by ID |
 | `PATCH` | `/api/v1/events/:id` | Update event |
 | `DELETE` | `/api/v1/events/:id` | Delete event |
@@ -117,8 +121,10 @@ curl -X POST http://localhost:3001/api/v1/graph/import \
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/correlate` | Correlate changes with an incident. Body: `{ affected_services, incident_time?, window_minutes? }` |
-| `POST` | `/api/v1/blast-radius` | Predict blast radius. Body: `{ services, change_type? }` |
+| `GET` | `/api/v1/change-sets` | Group related events into release/deployment change sets with readiness and evidence summaries |
+| `POST` | `/api/v1/correlate` | Correlate changes with an incident. Body: `{ affected_services, incident_time?, incident_environment?, window_minutes?, ... }` |
+| `POST` | `/api/v1/blast-radius` | Predict blast radius with confidence buckets (`highConfidenceDependents`, `possibleDependents`) |
+| `POST` | `/api/v1/triage` | One-call triage: returns top change sets, explainability factors, and blast-radius previews |
 | `GET` | `/api/v1/velocity/:service` | Change velocity. Query: `window_minutes`, `periods` |
 
 ### Graph
@@ -185,6 +191,26 @@ curl -X POST http://localhost:3001/api/v1/correlate \
     "affected_services": ["api-gateway", "user-service"],
     "window_minutes": 120
   }'
+```
+
+**Run single-call triage:**
+
+```bash
+curl -X POST http://localhost:3001/api/v1/triage \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "incident_time": "2026-02-21T18:00:00Z",
+    "incident_environment": "production",
+    "suspected_services": ["api-gateway", "user-service"],
+    "symptom_tags": ["latency", "5xx"],
+    "window_minutes": 120
+  }'
+```
+
+**List grouped change sets:**
+
+```bash
+curl "http://localhost:3001/api/v1/change-sets?since=2026-02-21T16:00:00Z&services=api-gateway,user-service"
 ```
 
 **Register a coding agent event:**
@@ -280,14 +306,15 @@ curl http://localhost:3001/api/v1/openapi.json
 
 ## Correlation scoring model
 
-When correlating changes with an incident, each change is scored on four dimensions:
+When correlating changes with an incident, each change is scored on five dimensions:
 
 | Factor | Weight | Method |
 |--------|--------|--------|
-| Time proximity | 40% | Exponential decay: `e^(-t/30)` where t is minutes |
-| Service overlap | 35% | Direct match = 1.0, 1-hop graph neighbor = 0.7, 2-hop = 0.4 |
+| Time proximity | 35% | Exponential decay: `e^(-t/30)` where t is minutes |
+| Service overlap | 30% | Direct match = 1.0, 1-hop graph neighbor = 0.7, 2-hop = 0.4 |
 | Change risk | 15% | Blast radius risk level: critical = 1.0, high = 0.8, medium = 0.5, low = 0.2 |
 | Change type | 10% | deployment = 1.0, config_change = 0.9, feature_flag = 0.8, ... |
+| Environment match | 10% | exact match = 1.0, unknown = 0.5, mismatch = 0.2 |
 
 ## MCP Server (Model Context Protocol)
 
@@ -298,7 +325,7 @@ npm run mcp
 # or: tsx src/server.ts --mcp
 ```
 
-This starts a stdio-based MCP server exposing 6 tools:
+This starts a stdio-based MCP server exposing 7 tools:
 
 | Tool | Description |
 |------|-------------|
@@ -306,6 +333,7 @@ This starts a stdio-based MCP server exposing 6 tools:
 | `correlate_changes` | Correlate changes with an incident (affected services + time) |
 | `predict_blast_radius` | Predict impact of a change using the service dependency graph |
 | `get_change_velocity` | Change frequency metrics for a service (single window or trend) |
+| `triage_incident` | One-call incident triage with top change sets, explainability, and blast-radius preview |
 | `import_graph` | Import a service dependency graph from JSON |
 | `list_services` | List all services in the dependency graph |
 

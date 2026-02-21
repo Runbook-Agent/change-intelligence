@@ -13,6 +13,7 @@ import { ServiceGraph, createServiceGraph } from '../service-graph';
 import { ChangeCorrelator } from '../correlator';
 import { BlastRadiusAnalyzer } from '../blast-radius';
 import { loadGraphFromJson, mergeGraph } from '../graph-loader';
+import { rankChangeSetsForIncident } from '../change-sets';
 
 function tmpDb() {
   return join(tmpdir(), `test-mcp-${randomUUID()}.db`);
@@ -121,6 +122,67 @@ function createTestMcpServer(store: ChangeEventStore, graph: ServiceGraph) {
   );
 
   server.tool(
+    'triage_incident',
+    'Single-call incident triage',
+    {
+      suspected_services: z.string().optional(),
+      incident_time: z.string().optional(),
+      incident_environment: z.string().optional(),
+      window_minutes: z.number().optional(),
+      symptom_tags: z.string().optional(),
+      max_change_sets: z.number().optional(),
+    },
+    async (args) => {
+      const incidentTime = args.incident_time || new Date().toISOString();
+      const windowMinutes = args.window_minutes || 120;
+      const services = args.suspected_services?.split(',').filter(Boolean) || [];
+      const since = new Date(new Date(incidentTime).getTime() - windowMinutes * 60_000).toISOString();
+      const recentEvents = store.query({ since, until: incidentTime, limit: 250 });
+
+      const serviceCounts = new Map<string, number>();
+      for (const event of recentEvents) {
+        for (const service of [event.service, ...(event.additionalServices || [])]) {
+          serviceCounts.set(service, (serviceCounts.get(service) || 0) + 1);
+        }
+      }
+      const inferredServices = Array.from(serviceCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([service]) => service);
+      const affectedServices = services.length > 0 ? services : inferredServices;
+
+      const correlations = correlator.correlateWithIncident(
+        affectedServices,
+        incidentTime,
+        {
+          windowMinutes,
+          maxResults: 250,
+          minScore: 0.05,
+          incidentEnvironment: args.incident_environment,
+        }
+      );
+
+      const topChangeSets = rankChangeSetsForIncident(correlations, graph, analyzer, {
+        maxResults: args.max_change_sets || 3,
+      });
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            incidentTime,
+            affectedServices,
+            symptomTags: args.symptom_tags?.split(',').filter(Boolean) || [],
+            windowMinutes,
+            topChangeSets,
+            correlations: correlations.slice(0, 20),
+          }, null, 2),
+        }],
+      };
+    },
+  );
+
+  server.tool(
     'import_graph',
     'Import service graph',
     { config: z.string() },
@@ -174,9 +236,9 @@ describe('MCP Server', () => {
     if (existsSync(dbPath)) unlinkSync(dbPath);
   });
 
-  it('lists 6 tools', async () => {
+  it('lists 7 tools', async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(7);
     const names = tools.map(t => t.name).sort();
     expect(names).toEqual([
       'correlate_changes',
@@ -185,6 +247,7 @@ describe('MCP Server', () => {
       'list_services',
       'predict_blast_radius',
       'query_change_events',
+      'triage_incident',
     ]);
   });
 
@@ -270,5 +333,23 @@ describe('MCP Server', () => {
     const response = JSON.parse(text);
     expect(response.services).toHaveLength(2);
     expect(response.services.map((s: any) => s.id).sort()).toEqual(['api', 'db']);
+  });
+
+  it('triage_incident returns top change sets', async () => {
+    const incoming = loadGraphFromJson({
+      services: [{ id: 'api', name: 'API', type: 'service', tags: [] }],
+      dependencies: [],
+    });
+    mergeGraph(graph, incoming, 'test');
+    store.insert({ service: 'api', changeType: 'deployment', summary: 'Deploy v1' });
+
+    const result = await client.callTool({
+      name: 'triage_incident',
+      arguments: { suspected_services: 'api' },
+    });
+    const text = (result.content as any)[0].text;
+    const response = JSON.parse(text);
+    expect(response.topChangeSets).toBeDefined();
+    expect(Array.isArray(response.topChangeSets)).toBe(true);
   });
 });

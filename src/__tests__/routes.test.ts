@@ -167,6 +167,9 @@ describe('Routes', () => {
       const body = res.json();
       expect(body.correlations).toBeDefined();
       expect(body.correlations.length).toBeGreaterThanOrEqual(1);
+      expect(body.correlations[0].confidence).toBeDefined();
+      expect(body.correlations[0].evidence).toBeDefined();
+      expect(body.changeSets).toBeDefined();
     });
 
     it('returns 400 with structured error for invalid payload', async () => {
@@ -195,6 +198,67 @@ describe('Routes', () => {
       const body = res.json();
       expect(body.directServices).toContain('api');
       expect(body.criticalPathAffected).toBe(true);
+      expect(body.highConfidenceDependents).toBeDefined();
+      expect(body.possibleDependents).toBeDefined();
+      expect(body.evidence).toBeDefined();
+    });
+  });
+
+  describe('Change Sets + Triage', () => {
+    it('GET /api/v1/change-sets groups related events', async () => {
+      await server.inject({
+        method: 'POST',
+        url: '/api/v1/events',
+        payload: {
+          service: 'api',
+          summary: 'Deploy part 1',
+          changeType: 'deployment',
+          changeSetId: 'release-123',
+        },
+      });
+      await server.inject({
+        method: 'POST',
+        url: '/api/v1/events',
+        payload: {
+          service: 'db',
+          summary: 'Deploy part 2',
+          changeType: 'db_migration',
+          changeSetId: 'release-123',
+        },
+      });
+
+      const res = await server.inject({ method: 'GET', url: '/api/v1/change-sets' });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.changeSets.length).toBeGreaterThanOrEqual(1);
+      expect(body.changeSets[0].eventCount).toBeGreaterThanOrEqual(1);
+    });
+
+    it('POST /api/v1/triage returns top change sets', async () => {
+      await server.inject({
+        method: 'POST',
+        url: '/api/v1/events',
+        payload: {
+          service: 'api',
+          changeType: 'deployment',
+          summary: 'Deploy v1.1',
+        },
+      });
+
+      const res = await server.inject({
+        method: 'POST',
+        url: '/api/v1/triage',
+        payload: {
+          suspected_services: ['api'],
+          symptom_tags: ['latency', '5xx'],
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.topChangeSets).toBeDefined();
+      expect(Array.isArray(body.topChangeSets)).toBe(true);
+      expect(body.correlations).toBeDefined();
     });
   });
 

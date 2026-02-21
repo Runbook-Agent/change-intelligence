@@ -72,11 +72,31 @@ export async function graphRoutes(fastify: FastifyInstance): Promise<void> {
 
     const dependencies = fastify.serviceGraph.getDependencies(service).map(s => s.id);
     const dependents = fastify.serviceGraph.getDependents(service).map(s => s.id);
+    const dependencyDetails = fastify.serviceGraph.getOutgoingEdges(service).map(edge => ({
+      source: edge.source,
+      target: edge.target,
+      type: edge.type,
+      criticality: edge.criticality,
+      edgeSource: edge.edgeSource,
+      confidence: edge.confidence,
+      lastSeen: edge.lastSeen,
+    }));
+    const dependentDetails = fastify.serviceGraph.getIncomingEdges(service).map(edge => ({
+      source: edge.source,
+      target: edge.target,
+      type: edge.type,
+      criticality: edge.criticality,
+      edgeSource: edge.edgeSource,
+      confidence: edge.confidence,
+      lastSeen: edge.lastSeen,
+    }));
 
     return reply.send({
       service: { id: node.id, name: node.name, type: node.type, tier: node.tier },
       dependencies,
       dependents,
+      dependencyDetails,
+      dependentDetails,
     });
   });
 

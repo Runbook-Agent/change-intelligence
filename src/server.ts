@@ -21,6 +21,8 @@ import { eventsRoutes } from './routes/events';
 import { batchRoutes } from './routes/batch';
 import { correlateRoutes } from './routes/correlate';
 import { blastRadiusRoutes } from './routes/blast-radius';
+import { triageRoutes } from './routes/triage';
+import { changeSetRoutes } from './routes/change-sets';
 import { velocityRoutes } from './routes/velocity';
 import { graphRoutes } from './routes/graph';
 import { githubWebhookRoutes } from './routes/webhooks/github';
@@ -119,6 +121,8 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
   await fastify.register(batchRoutes);
   await fastify.register(correlateRoutes);
   await fastify.register(blastRadiusRoutes);
+  await fastify.register(triageRoutes);
+  await fastify.register(changeSetRoutes);
   await fastify.register(velocityRoutes);
   await fastify.register(graphRoutes);
   await fastify.register(githubWebhookRoutes);

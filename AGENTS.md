@@ -36,11 +36,14 @@ Webhook Ingestion ──► SQLite Store ◄── Query API (REST)
 (GitHub, AWS)         (changes.db)     (Fastify)
        │                   │
        ▼                   ▼
-Change Correlator    Blast Radius Analyzer
-(weighted scoring)   (graph BFS traversal)
-       │                   │
-       └───── Service Dependency Graph ─────┘
-              (in-memory, loaded from YAML)
+Change Correlator ───────► Change Set Grouper ───────► Triage API
+(evidence + confidence)    (release/deploy bundles)    (/api/v1/triage)
+       │                          │
+       └─────── Blast Radius Analyzer ◄───────────────┘
+               (confidence-aware graph traversal)
+                            │
+                            └── Service Dependency Graph
+                                (in-memory, edge confidence + source)
 ```
 
 **Stack:** Fastify 5, better-sqlite3, Zod, TypeScript (strict), @modelcontextprotocol/sdk. No external databases, message queues, or cache layers.
@@ -50,6 +53,8 @@ Change Correlator    Blast Radius Analyzer
 ```
 src/
 ├── backstage-client.ts     ← Backstage catalog client + entity→graph conversion.
+├── provenance.ts           ← Evidence URL extraction + canonical URL inference.
+├── change-sets.ts          ← Event grouping and ranking into ChangeSets.
 ├── types.ts                ← All domain types. THE canonical source of truth.
 ├── store.ts                ← SQLite store with FTS5. Pattern: better-sqlite3 + WAL mode.
 ├── errors.ts               ← Structured error helpers (sendError, validationError, notFoundError, etc.)
@@ -60,13 +65,15 @@ src/
 ├── webhook-store.ts        ← Webhook registration persistence (shares SQLite DB).
 ├── webhook-dispatcher.ts   ← Async event dispatch to registered webhook URLs.
 ├── openapi.ts              ← Hand-crafted OpenAPI 3.1 spec object.
-├── mcp-server.ts           ← MCP server (stdio transport, 6 tools).
+├── mcp-server.ts           ← MCP server (stdio transport, 7 tools).
 ├── server.ts               ← Fastify setup, decorations, entry point. --mcp flag for MCP mode.
 ├── routes/
 │   ├── events.ts           ← CRUD + query for change events (with idempotency support).
 │   ├── batch.ts            ← POST /api/v1/events/batch (atomic batch ingestion).
+│   ├── change-sets.ts      ← GET /api/v1/change-sets
 │   ├── correlate.ts        ← POST /api/v1/correlate
 │   ├── blast-radius.ts     ← POST /api/v1/blast-radius
+│   ├── triage.ts           ← POST /api/v1/triage
 │   ├── velocity.ts         ← GET /api/v1/velocity/:service
 │   ├── graph.ts            ← Graph import, list, dependencies, Backstage sync.
 │   ├── openapi.ts          ← GET /api/v1/openapi.json
@@ -82,15 +89,15 @@ src/
     ├── store.test.ts              (19 tests)
     ├── correlator.test.ts         (6 tests)
     ├── blast-radius.test.ts       (7 tests)
-    ├── routes.test.ts             (17 tests)
+    ├── routes.test.ts             (19 tests)
     ├── webhooks.test.ts           (21 tests)
-    ├── backstage.test.ts          (25 tests)
+    ├── backstage.test.ts          (24 tests)
     ├── errors.test.ts             (8 tests)
     ├── idempotency.test.ts        (8 tests)
     ├── batch.test.ts              (6 tests)
     ├── webhook-registrations.test.ts (7 tests)
     ├── openapi.test.ts            (5 tests)
-    └── mcp-server.test.ts         (6 tests)
+    └── mcp-server.test.ts         (7 tests)
 ```
 
 ## Critical Implementation Details
@@ -151,14 +158,27 @@ Events support an optional `idempotencyKey` field. The store has a partial uniqu
 
 `mcp-server.ts` creates its own `ChangeEventStore`, `ServiceGraph`, etc. — it does NOT import from `server.ts`. This keeps the MCP server independent of HTTP. The `--mcp` flag in `main()` dynamically imports `./mcp-server` and calls `startMcpServer()`, then returns early (no HTTP server starts).
 
+### 14. Correlation responses are explainability-first
+
+`/api/v1/correlate` now returns `whyRelevant`, `confidence` (factor breakdown), and `evidence` links per match. This includes graph-path evidence when adjacency drove the score.
+
+### 15. Blast radius distinguishes confidence buckets
+
+`BlastRadiusPrediction` includes `highConfidenceDependents` and `possibleDependents` in addition to direct/downstream lists. Path confidence is weakest-link over edge confidences, and inferred edges are treated as uncertain unless confidence is very high.
+
+### 16. ChangeSet is a first-class analysis layer
+
+`change-sets.ts` groups events into release/deploy units (explicit `changeSetId`, pipeline/run IDs, PR, commit, or time buckets). `/api/v1/triage` ranks these change sets and returns top candidates with readiness deltas.
+
 ## Correlation Scoring Model
 
 | Factor | Weight | Method |
 |--------|--------|--------|
-| Time proximity | 40% | `e^(-t/30)` — exponential decay, half-life ~30min |
-| Service overlap | 35% | Direct match=1.0, 1-hop graph neighbor=0.7, 2-hop=0.4 |
+| Time proximity | 35% | `e^(-t/30)` — exponential decay, half-life ~30min |
+| Service overlap | 30% | Direct match=1.0, 1-hop graph neighbor=0.7, 2-hop=0.4 |
 | Change risk | 15% | Blast radius risk: critical=1.0, high=0.8, medium=0.5, low=0.2 |
 | Change type | 10% | deployment=1.0, config_change=0.9, feature_flag=0.8, db_migration=0.85, infra_modification=0.7, code_change=0.65, rollback=0.6, scaling=0.5, security_patch=0.4 |
+| Environment match | 10% | exact match=1.0, unknown=0.5, mismatch=0.2 |
 
 The correlator expands affected services to 2-hop graph neighbors before querying the store. This means a change to service C will still be found if the incident affects service A and A→B→C exists in the graph.
 
@@ -174,7 +194,7 @@ The correlator expands affected services to 2-hop graph neighbors before queryin
 ## Service Graph Population — Three Layers
 
 1. **Config-driven (implemented):** YAML file loaded on startup via `CHANGE_INTEL_GRAPH_PATH`. This is the primary mechanism today.
-2. **Backstage catalog import (implemented):** `POST /api/v1/graph/import/backstage` fetches entities from a Backstage instance and converts them to our graph model. Supports cursor-based pagination, optional filters (namespaces, lifecycles, types, systems), and non-destructive merge via `mergeGraph()`.
+2. **Backstage catalog import (implemented):** `POST /api/v1/graph/import/backstage` fetches entities from a Backstage instance and converts them to our graph model. Supports cursor-based pagination, optional filters (namespaces, lifecycles, types, systems), sets edge provenance (`edge_source: backstage`) and confidence, and merges non-destructively via `mergeGraph()`.
 3. **Auto-discovery (stubbed):** `POST /api/v1/graph/discover` returns 501. Future: AWS/K8s service enumeration + dependency inference.
 4. **Change event inference (stubbed):** `GET /api/v1/graph/suggestions` returns empty. Future: co-deployment and co-failure pattern analysis to suggest edges.
 
@@ -184,6 +204,8 @@ The correlator expands affected services to 2-hop graph neighbors before queryin
 - **ChangeSource:** `github`, `gitlab`, `aws_codepipeline`, `aws_ecs`, `aws_lambda`, `kubernetes`, `claude_hook`, `agent_hook`, `manual`, `terraform`
 - **ChangeInitiator:** `human`, `agent`, `automation`, `unknown`
 - **ChangeStatus:** `in_progress`, `completed`, `failed`, `rolled_back`
+- **ChangeAuthorType:** `human`, `ai_assisted`, `autonomous_agent`
+- **TestSignal:** `passed`, `failed`, `partial`, `unknown`
 
 The `agent` initiator is the key differentiator — this service is designed to track changes made by AI agents (Claude, Copilot, etc.) alongside human and CI/CD changes.
 
@@ -192,6 +214,8 @@ The `agent` initiator is the key differentiator — this service is designed to 
 Two tables in the same SQLite database (WAL mode):
 
 **`change_events`** — indexes on: `timestamp`, `service`, `change_type`, `environment`, `status`, `commit_sha`, `idempotency_key` (partial unique, WHERE NOT NULL). JSON columns stored as TEXT: `additional_services`, `files_changed`, `config_keys`, `blast_radius`, `tags`, `metadata`.
+
+Additional event columns include `author_type`, `review_model`, `human_review_count`, `test_signal`, `change_set_id`, and `canonical_url`. `change_set_id` is indexed for change set queries.
 
 **`webhook_registrations`** — stores registered webhook URLs with filter criteria (services, change_types, environments), optional secret for HMAC signing, and active flag.
 
@@ -210,12 +234,14 @@ FTS5 virtual table `change_events_fts` on `summary` + `service`, kept in sync vi
 |--------|------|---------|
 | POST | `/events` | Create change event (supports idempotencyKey, auto-computes blast radius) |
 | POST | `/events/batch` | Atomic batch ingestion (up to 1000 events, per-event idempotency) |
-| GET | `/events` | Query with filters (services, change_types, sources, environment, since, until, initiator, status, q, limit) |
+| GET | `/events` | Query with filters (services, change_types, sources, environment, since, until, initiator, status, change_set_ids, q, limit) |
 | GET | `/events/:id` | Get by ID |
 | PATCH | `/events/:id` | Update fields |
 | DELETE | `/events/:id` | Delete |
+| GET | `/change-sets` | Group events into ChangeSets |
 | POST | `/correlate` | Correlate changes with incident |
 | POST | `/blast-radius` | Predict blast radius |
+| POST | `/triage` | One-call incident triage (top ChangeSets + evidence + confidence) |
 | GET | `/velocity/:service` | Change velocity (single window or trend) |
 | POST | `/graph/import` | Import graph (JSON config or export format) |
 | POST | `/graph/import/backstage` | Import from Backstage service catalog |
@@ -253,3 +279,5 @@ These are designed but not built. The endpoints exist and return appropriate stu
 - **Adding a new error response?** Use the helpers in `errors.ts`. Never return raw `{ error: '...' }` objects — always use `validationError()`, `notFoundError()`, etc.
 - **Adding a new endpoint?** Also add it to `openapi.ts` spec and update the MCP server tools in `mcp-server.ts` if relevant.
 - **JSON columns:** `additional_services`, `files_changed`, `config_keys`, `blast_radius`, `tags`, `metadata` are stored as JSON strings. Always `JSON.stringify()` on write, `JSON.parse()` on read. The `rowToEvent()` method handles this.
+- **Touching correlation outputs?** Keep `correlationReasons` for backwards compatibility and mirror explainability in `whyRelevant`.
+- **Touching graph edges?** Preserve `edgeSource`, `confidence`, and `lastSeen` when importing/merging edges, or blast-radius confidence buckets will silently degrade.

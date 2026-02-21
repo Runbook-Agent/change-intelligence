@@ -12,6 +12,7 @@ import { ChangeEventStore } from './store';
 import { ServiceGraph, createServiceGraph } from './service-graph';
 import { ChangeCorrelator } from './correlator';
 import { BlastRadiusAnalyzer } from './blast-radius';
+import { rankChangeSetsForIncident } from './change-sets';
 
 export async function startMcpServer(): Promise<void> {
   const dbPath = process.env.CHANGE_INTEL_DB_PATH || 'changes.db';
@@ -127,6 +128,68 @@ export async function startMcpServer(): Promise<void> {
 
       const velocity = store.getVelocity(args.service, windowMinutes);
       return { content: [{ type: 'text', text: JSON.stringify(velocity, null, 2) }] };
+    },
+  );
+
+  // Tool: triage_incident
+  server.tool(
+    'triage_incident',
+    'Single-call incident triage. Returns top related change sets with evidence, why-relevant factors, and blast radius previews.',
+    {
+      suspected_services: z.string().optional().describe('Comma-separated service names'),
+      incident_time: z.string().optional().describe('ISO 8601 datetime (default: now)'),
+      incident_environment: z.string().optional().describe('Environment name (production, staging, etc.)'),
+      window_minutes: z.number().optional().describe('Lookback window in minutes (default: 120)'),
+      symptom_tags: z.string().optional().describe('Comma-separated tags like latency,5xx,db,auth'),
+      max_change_sets: z.number().optional().describe('Max change sets to return (default: 3)'),
+    },
+    async (args) => {
+      const incidentTime = args.incident_time || new Date().toISOString();
+      const windowMinutes = args.window_minutes || 120;
+      const suspectedServices = args.suspected_services?.split(',').filter(Boolean) || [];
+      const since = new Date(new Date(incidentTime).getTime() - windowMinutes * 60_000).toISOString();
+      const recentEvents = store.query({ since, until: incidentTime, limit: 250 });
+
+      const serviceCounts = new Map<string, number>();
+      for (const event of recentEvents) {
+        for (const service of [event.service, ...(event.additionalServices || [])]) {
+          serviceCounts.set(service, (serviceCounts.get(service) || 0) + 1);
+        }
+      }
+      const inferredServices = Array.from(serviceCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([service]) => service);
+      const affectedServices = suspectedServices.length > 0 ? suspectedServices : inferredServices;
+
+      const correlations = correlator.correlateWithIncident(
+        affectedServices,
+        incidentTime,
+        {
+          windowMinutes,
+          maxResults: 250,
+          minScore: 0.05,
+          incidentEnvironment: args.incident_environment,
+        }
+      );
+
+      const topChangeSets = rankChangeSetsForIncident(correlations, graph, analyzer, {
+        maxResults: args.max_change_sets || 3,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            incidentTime,
+            affectedServices,
+            symptomTags: args.symptom_tags?.split(',').filter(Boolean) || [],
+            windowMinutes,
+            topChangeSets,
+            correlations: correlations.slice(0, 20),
+          }, null, 2),
+        }],
+      };
     },
   );
 

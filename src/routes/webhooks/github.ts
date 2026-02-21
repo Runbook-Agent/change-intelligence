@@ -6,7 +6,10 @@
 
 import type { FastifyInstance } from 'fastify';
 import { createHmac, timingSafeEqual } from 'crypto';
+import type { ChangeEventStore } from '../../store';
 import { unauthorizedError, internalError } from '../../errors';
+
+type ParsedEvent = Parameters<ChangeEventStore['insert']>[0];
 
 export async function githubWebhookRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/webhooks/github', async (request, reply) => {
@@ -48,7 +51,7 @@ export async function githubWebhookRoutes(fastify: FastifyInstance): Promise<voi
 function parseGitHubEvent(
   eventType: string,
   payload: Record<string, unknown>
-): Record<string, unknown> | null {
+): ParsedEvent | null {
   switch (eventType) {
     case 'deployment':
     case 'deployment_status':
@@ -62,7 +65,7 @@ function parseGitHubEvent(
   }
 }
 
-function parseDeploymentEvent(payload: Record<string, unknown>): Record<string, unknown> {
+function parseDeploymentEvent(payload: Record<string, unknown>): ParsedEvent {
   const deployment = payload.deployment as Record<string, unknown> || {};
   const repo = payload.repository as Record<string, unknown> || {};
   const sender = payload.sender as Record<string, unknown> || {};
@@ -85,7 +88,7 @@ function parseDeploymentEvent(payload: Record<string, unknown>): Record<string, 
   };
 }
 
-function parsePushEvent(payload: Record<string, unknown>): Record<string, unknown> | null {
+function parsePushEvent(payload: Record<string, unknown>): ParsedEvent | null {
   const ref = payload.ref as string || '';
   const mainBranches = ['refs/heads/main', 'refs/heads/master', 'refs/heads/production'];
 
@@ -112,7 +115,7 @@ function parsePushEvent(payload: Record<string, unknown>): Record<string, unknow
   };
 }
 
-function parsePullRequestEvent(payload: Record<string, unknown>): Record<string, unknown> | null {
+function parsePullRequestEvent(payload: Record<string, unknown>): ParsedEvent | null {
   const action = payload.action as string;
   if (action !== 'closed') return null;
 

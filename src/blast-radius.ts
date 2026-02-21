@@ -1,5 +1,5 @@
 /**
- * BlastRadiusAnalyzer — Predicts impact of changes using the service graph
+ * BlastRadiusAnalyzer — Predicts impact of changes using the service graph.
  *
  * Risk levels:
  * - critical: any critical impact path
@@ -8,8 +8,26 @@
  * - low: otherwise
  */
 
-import type { BlastRadiusPrediction } from './types';
+import type { BlastRadiusPrediction, EvidenceLink } from './types';
 import type { ServiceGraph, ImpactPath } from './service-graph';
+
+function dedupe(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function dedupeEvidence(evidence: EvidenceLink[]): EvidenceLink[] {
+  const seen = new Set<string>();
+  const result: EvidenceLink[] = [];
+
+  for (const item of evidence) {
+    const key = `${item.type}|${item.label}|${item.url || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+
+  return result;
+}
 
 export class BlastRadiusAnalyzer {
   constructor(private graph: ServiceGraph) {}
@@ -22,7 +40,10 @@ export class BlastRadiusAnalyzer {
     const maxDepth = options?.maxDepth ?? 3;
     const directServices = new Set<string>();
     const downstreamServices = new Set<string>();
+    const highConfidenceDependents = new Set<string>();
+    const possibleDependents = new Set<string>();
     const allImpactPaths: ImpactPath[] = [];
+    const evidence: EvidenceLink[] = [];
     let criticalPathAffected = false;
 
     for (const service of targetServices) {
@@ -37,18 +58,40 @@ export class BlastRadiusAnalyzer {
           downstreamServices.add(path.affected);
         }
 
+        if (this.isHighConfidencePath(path)) {
+          highConfidenceDependents.add(path.affected);
+        } else {
+          possibleDependents.add(path.affected);
+        }
+
         if (path.criticality === 'critical') {
           criticalPathAffected = true;
         }
+
+        evidence.push({
+          type: 'graph_path',
+          label: `Impact path ${path.path.join(' -> ')}`,
+          source: 'service_graph',
+          details: {
+            from: path.source,
+            to: path.affected,
+            hops: path.hops - 1,
+            criticality: path.criticality,
+            confidence: path.confidence,
+            edgeSources: path.edgeSources,
+          },
+        });
 
         allImpactPaths.push(path);
       }
     }
 
-    // Remove targets from downstream
+    // Remove targets from all dependent buckets
     for (const svc of targetServices) {
       directServices.delete(svc);
       downstreamServices.delete(svc);
+      highConfidenceDependents.delete(svc);
+      possibleDependents.delete(svc);
     }
     // Remove direct services from downstream to avoid double counting
     for (const svc of directServices) {
@@ -66,6 +109,8 @@ export class BlastRadiusAnalyzer {
       targetServices,
       directServices,
       downstreamServices,
+      highConfidenceDependents,
+      possibleDependents,
       criticalPathAffected,
       riskLevel,
       changeType
@@ -76,17 +121,33 @@ export class BlastRadiusAnalyzer {
       to: p.affected,
       hops: p.hops,
       criticality: p.criticality,
+      confidence: p.confidence,
+      edgeSources: p.edgeSources,
       path: p.path,
     }));
 
     return {
       directServices: Array.from(directServices),
       downstreamServices: Array.from(downstreamServices),
+      highConfidenceDependents: Array.from(highConfidenceDependents),
+      possibleDependents: Array.from(possibleDependents),
       criticalPathAffected,
       riskLevel,
       impactPaths,
+      confidenceSummary: {
+        highConfidenceCount: highConfidenceDependents.size,
+        possibleCount: possibleDependents.size,
+      },
+      evidence: dedupeEvidence(evidence).slice(0, 40),
       rationale,
     };
+  }
+
+  private isHighConfidencePath(path: ImpactPath): boolean {
+    if (path.confidence < 0.75) return false;
+    // Treat inferred edges as uncertain unless confidence is very high
+    if (path.edgeSources.includes('inferred') && path.confidence < 0.9) return false;
+    return true;
   }
 
   private computeRiskLevel(
@@ -109,6 +170,8 @@ export class BlastRadiusAnalyzer {
     targets: string[],
     direct: Set<string>,
     downstream: Set<string>,
+    highConfidenceDependents: Set<string>,
+    possibleDependents: Set<string>,
     criticalPath: boolean,
     riskLevel: string,
     changeType?: string
@@ -128,6 +191,18 @@ export class BlastRadiusAnalyzer {
     if (downstream.size > 0) {
       rationale.push(
         `${downstream.size} downstream service(s) in the impact path`
+      );
+    }
+
+    if (highConfidenceDependents.size > 0) {
+      rationale.push(
+        `${highConfidenceDependents.size} high-confidence dependent(s): ${dedupe(Array.from(highConfidenceDependents)).join(', ')}`
+      );
+    }
+
+    if (possibleDependents.size > 0) {
+      rationale.push(
+        `${possibleDependents.size} possible dependent(s) via uncertain edges`
       );
     }
 

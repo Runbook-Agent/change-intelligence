@@ -29,6 +29,45 @@ export type ChangeSource =
 
 export type ChangeInitiator = 'human' | 'agent' | 'automation' | 'unknown';
 export type ChangeStatus = 'in_progress' | 'completed' | 'failed' | 'rolled_back';
+export type ChangeAuthorType = 'human' | 'ai_assisted' | 'autonomous_agent';
+export type TestSignal = 'passed' | 'failed' | 'partial' | 'unknown';
+
+export interface EvidenceLink {
+  type:
+    | 'event'
+    | 'pull_request'
+    | 'commit'
+    | 'deployment_run'
+    | 'pipeline_run'
+    | 'terraform_run'
+    | 'kubernetes_rollout'
+    | 'graph_path'
+    | 'other';
+  label: string;
+  url?: string;
+  source?: string;
+  eventId?: string;
+  timestamp?: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ConfidenceBreakdown {
+  overall: number;
+  factors: {
+    timeProximity: number;
+    serviceAdjacency: number;
+    changeRisk: number;
+    changeType: number;
+    environmentMatch: number;
+  };
+}
+
+export interface ReadinessDelta {
+  runbookUpdated: 'updated' | 'missing' | 'unknown';
+  monitoringUpdated: 'updated' | 'missing' | 'unknown';
+  ownershipKnown: 'updated' | 'missing' | 'unknown';
+  notes: string[];
+}
 
 export interface ChangeEvent {
   id: string;
@@ -50,6 +89,12 @@ export interface ChangeEvent {
   diff?: string;
   filesChanged?: string[];
   configKeys?: string[];
+  authorType?: ChangeAuthorType;
+  reviewModel?: string;
+  humanReviewCount?: number;
+  testSignal?: TestSignal;
+  changeSetId?: string;
+  canonicalUrl?: string;
   previousVersion?: string;
   newVersion?: string;
   blastRadius?: BlastRadiusPrediction;
@@ -63,6 +108,8 @@ export interface ChangeEvent {
 export interface BlastRadiusPrediction {
   directServices: string[];
   downstreamServices: string[];
+  highConfidenceDependents?: string[];
+  possibleDependents?: string[];
   criticalPathAffected: boolean;
   riskLevel: 'low' | 'medium' | 'high' | 'critical';
   impactPaths: {
@@ -71,7 +118,14 @@ export interface BlastRadiusPrediction {
     hops: number;
     criticality: string;
     path: string[];
+    confidence?: number;
+    edgeSources?: string[];
   }[];
+  confidenceSummary?: {
+    highConfidenceCount: number;
+    possibleCount: number;
+  };
+  evidence?: EvidenceLink[];
   rationale: string[];
 }
 
@@ -79,8 +133,50 @@ export interface ChangeCorrelation {
   changeEvent: ChangeEvent;
   correlationScore: number;
   correlationReasons: string[];
+  whyRelevant: string[];
   serviceOverlap: string[];
   timeDeltaMinutes: number;
+  confidence: ConfidenceBreakdown;
+  evidence: EvidenceLink[];
+}
+
+export interface ChangeSet {
+  id: string;
+  key: string;
+  title: string;
+  summary: string;
+  eventCount: number;
+  eventIds: string[];
+  events: ChangeEvent[];
+  services: string[];
+  repositories: string[];
+  environment: string;
+  windowStart: string;
+  windowEnd: string;
+  changeTypes: ChangeType[];
+  initiators: ChangeInitiator[];
+  authorTypes: ChangeAuthorType[];
+  evidence: EvidenceLink[];
+  readinessDelta: ReadinessDelta;
+  confidence: number;
+}
+
+export interface TriageCandidate {
+  changeSet: ChangeSet;
+  score: number;
+  whyRelevant: string[];
+  confidence: ConfidenceBreakdown;
+  evidence: EvidenceLink[];
+  suggestedBlastRadius?: BlastRadiusPrediction;
+}
+
+export interface TriageResult {
+  incidentTime: string;
+  affectedServices: string[];
+  windowMinutes: number;
+  symptomTags: string[];
+  topChangeSets: TriageCandidate[];
+  correlations: ChangeCorrelation[];
 }
 
 export interface ChangeVelocityMetric {
@@ -101,6 +197,7 @@ export interface ChangeQueryOptions {
   until?: string;
   initiator?: ChangeInitiator;
   status?: ChangeStatus;
+  changeSetIds?: string[];
   query?: string;
   limit?: number;
 }

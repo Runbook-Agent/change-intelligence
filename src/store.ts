@@ -44,8 +44,14 @@ export class ChangeEventStore {
         diff TEXT,
         files_changed TEXT DEFAULT '[]',
         config_keys TEXT DEFAULT '[]',
+        author_type TEXT,
+        review_model TEXT,
+        human_review_count INTEGER,
+        test_signal TEXT,
         previous_version TEXT,
         new_version TEXT,
+        change_set_id TEXT,
+        canonical_url TEXT,
         blast_radius TEXT,
         tags TEXT DEFAULT '[]',
         metadata TEXT DEFAULT '{}',
@@ -59,6 +65,7 @@ export class ChangeEventStore {
       CREATE INDEX IF NOT EXISTS idx_ce_environment ON change_events(environment);
       CREATE INDEX IF NOT EXISTS idx_ce_status ON change_events(status);
       CREATE INDEX IF NOT EXISTS idx_ce_commit_sha ON change_events(commit_sha);
+      CREATE INDEX IF NOT EXISTS idx_ce_change_set_id ON change_events(change_set_id);
 
       CREATE VIRTUAL TABLE IF NOT EXISTS change_events_fts USING fts5(
         summary,
@@ -85,15 +92,32 @@ export class ChangeEventStore {
       END;
     `);
 
-    // Schema migration: add idempotency_key column if missing
-    const columns = this.db.prepare("PRAGMA table_info(change_events)").all() as { name: string }[];
-    const hasIdempotencyKey = columns.some(c => c.name === 'idempotency_key');
-    if (!hasIdempotencyKey) {
-      this.db.exec(`ALTER TABLE change_events ADD COLUMN idempotency_key TEXT`);
-    }
+    // Schema migrations for older DBs
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(change_events)").all() as { name: string }[])
+        .map(c => c.name)
+    );
+    const ensureColumn = (name: string, def: string): void => {
+      if (!columns.has(name)) {
+        this.db.exec(`ALTER TABLE change_events ADD COLUMN ${name} ${def}`);
+        columns.add(name);
+      }
+    };
+
+    ensureColumn('idempotency_key', 'TEXT');
+    ensureColumn('author_type', 'TEXT');
+    ensureColumn('review_model', 'TEXT');
+    ensureColumn('human_review_count', 'INTEGER');
+    ensureColumn('test_signal', 'TEXT');
+    ensureColumn('change_set_id', 'TEXT');
+    ensureColumn('canonical_url', 'TEXT');
+
     this.db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_ce_idempotency_key
       ON change_events(idempotency_key) WHERE idempotency_key IS NOT NULL
+    `);
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_ce_change_set_id ON change_events(change_set_id)
     `);
   }
 
@@ -103,7 +127,18 @@ export class ChangeEventStore {
     return this.rowToEvent(row);
   }
 
-  insert(event: Partial<ChangeEvent> & { service: string; changeType: string; summary: string }): ChangeEvent {
+  insert(
+    event: Omit<Partial<ChangeEvent>, 'service' | 'changeType' | 'summary' | 'status' | 'source' | 'initiator' | 'authorType' | 'testSignal'> & {
+      service: string;
+      changeType: string;
+      summary: string;
+      status?: string;
+      source?: string;
+      initiator?: string;
+      authorType?: string;
+      testSignal?: string;
+    }
+  ): ChangeEvent {
     const now = new Date().toISOString();
     const id = event.id || randomUUID();
 
@@ -127,8 +162,14 @@ export class ChangeEventStore {
       diff: event.diff,
       filesChanged: event.filesChanged,
       configKeys: event.configKeys,
+      authorType: (event.authorType as ChangeEvent['authorType']) || this.inferAuthorType(event.initiator as ChangeEvent['initiator']),
+      reviewModel: event.reviewModel,
+      humanReviewCount: event.humanReviewCount,
+      testSignal: event.testSignal as ChangeEvent['testSignal'],
       previousVersion: event.previousVersion,
       newVersion: event.newVersion,
+      changeSetId: event.changeSetId,
+      canonicalUrl: event.canonicalUrl,
       blastRadius: event.blastRadius,
       idempotencyKey: event.idempotencyKey,
       tags: event.tags || [],
@@ -142,9 +183,10 @@ export class ChangeEventStore {
       (id, timestamp, service, additional_services, change_type, source, initiator,
        initiator_identity, status, environment, commit_sha, pr_number, pr_url,
        repository, branch, summary, diff, files_changed, config_keys,
-       previous_version, new_version, blast_radius, tags, metadata, created_at, updated_at,
-       idempotency_key)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       author_type, review_model, human_review_count, test_signal,
+       previous_version, new_version, change_set_id, canonical_url, blast_radius,
+       tags, metadata, created_at, updated_at, idempotency_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -167,8 +209,14 @@ export class ChangeEventStore {
       full.diff || null,
       JSON.stringify(full.filesChanged || []),
       JSON.stringify(full.configKeys || []),
+      full.authorType || null,
+      full.reviewModel || null,
+      full.humanReviewCount ?? null,
+      full.testSignal || null,
       full.previousVersion || null,
       full.newVersion || null,
+      full.changeSetId || null,
+      full.canonicalUrl || null,
       full.blastRadius ? JSON.stringify(full.blastRadius) : null,
       JSON.stringify(full.tags),
       JSON.stringify(full.metadata),
@@ -213,8 +261,14 @@ export class ChangeEventStore {
       diff: 'diff',
       filesChanged: 'files_changed',
       configKeys: 'config_keys',
+      authorType: 'author_type',
+      reviewModel: 'review_model',
+      humanReviewCount: 'human_review_count',
+      testSignal: 'test_signal',
       previousVersion: 'previous_version',
       newVersion: 'new_version',
+      changeSetId: 'change_set_id',
+      canonicalUrl: 'canonical_url',
       blastRadius: 'blast_radius',
       tags: 'tags',
       metadata: 'metadata',
@@ -293,6 +347,11 @@ export class ChangeEventStore {
     if (options.status) {
       conditions.push('status = ?');
       params.push(options.status);
+    }
+
+    if (options.changeSetIds && options.changeSetIds.length > 0) {
+      conditions.push(`change_set_id IN (${options.changeSetIds.map(() => '?').join(',')})`);
+      params.push(...options.changeSetIds);
     }
 
     const limit = options.limit || 50;
@@ -478,8 +537,14 @@ export class ChangeEventStore {
       diff: row.diff as string | undefined,
       filesChanged: JSON.parse((row.files_changed as string) || '[]'),
       configKeys: JSON.parse((row.config_keys as string) || '[]'),
+      authorType: row.author_type as ChangeEvent['authorType'],
+      reviewModel: row.review_model as string | undefined,
+      humanReviewCount: this.parseMaybeNumber(row.human_review_count),
+      testSignal: row.test_signal as ChangeEvent['testSignal'],
       previousVersion: row.previous_version as string | undefined,
       newVersion: row.new_version as string | undefined,
+      changeSetId: row.change_set_id as string | undefined,
+      canonicalUrl: row.canonical_url as string | undefined,
       blastRadius: row.blast_radius ? JSON.parse(row.blast_radius as string) : undefined,
       idempotencyKey: row.idempotency_key as string | undefined,
       tags: JSON.parse((row.tags as string) || '[]'),
@@ -487,5 +552,20 @@ export class ChangeEventStore {
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
     };
+  }
+
+  private inferAuthorType(initiator?: ChangeEvent['initiator']): ChangeEvent['authorType'] {
+    if (initiator === 'agent') return 'autonomous_agent';
+    if (initiator === 'human') return 'human';
+    return 'ai_assisted';
+  }
+
+  private parseMaybeNumber(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return undefined;
   }
 }
