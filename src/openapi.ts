@@ -311,10 +311,11 @@ export const openapiSpec = {
       post: {
         operationId: 'handleAwsWebhook',
         summary: 'AWS EventBridge webhook receiver',
-        description: 'Receives CodePipeline, ECS, and Lambda state change events from AWS EventBridge.',
+        description: 'Receives CodePipeline, ECS, and Lambda state change events from AWS EventBridge. Optional bearer token auth via AWS_WEBHOOK_SECRET.',
         responses: {
           '201': { description: 'Event ingested' },
           '200': { description: 'Event ignored' },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/StructuredError' } } } },
         },
       },
     },

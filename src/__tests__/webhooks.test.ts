@@ -175,6 +175,56 @@ describe('Webhooks', () => {
     });
   });
 
+  // ─── AWS Webhook ───────────────────────────────────────────────────
+
+  describe('AWS Webhook', () => {
+    it('ingests a CodePipeline state change event', async () => {
+      const res = await server.inject({
+        method: 'POST',
+        url: '/api/v1/webhooks/aws',
+        payload: {
+          'detail-type': 'CodePipeline Pipeline Execution State Change',
+          region: 'us-east-1',
+          detail: {
+            pipeline: 'my-pipeline',
+            state: 'SUCCEEDED',
+            'execution-id': 'exec-123',
+          },
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+
+      const event = await server.inject({ method: 'GET', url: `/api/v1/events/${res.json().id}` });
+      const data = event.json();
+      expect(data.source).toBe('aws_codepipeline');
+      expect(data.status).toBe('completed');
+      expect(data.service).toBe('my-pipeline');
+    });
+
+    it('returns 401 when AWS webhook token is invalid', async () => {
+      process.env.AWS_WEBHOOK_SECRET = 'aws-secret';
+      try {
+        const res = await server.inject({
+          method: 'POST',
+          url: '/api/v1/webhooks/aws',
+          headers: {
+            authorization: 'Bearer wrong-token',
+          },
+          payload: {
+            'detail-type': 'CodePipeline Pipeline Execution State Change',
+            detail: { pipeline: 'my-pipeline', state: 'SUCCEEDED' },
+          },
+        });
+
+        expect(res.statusCode).toBe(401);
+        expect(res.json().error).toBe('unauthorized');
+      } finally {
+        delete process.env.AWS_WEBHOOK_SECRET;
+      }
+    });
+  });
+
   // ─── GitHub Webhook ────────────────────────────────────────────────
 
   describe('GitHub Webhook', () => {

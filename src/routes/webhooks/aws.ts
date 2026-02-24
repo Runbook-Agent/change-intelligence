@@ -6,12 +6,24 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { ChangeEventStore } from '../../store';
-import { internalError } from '../../errors';
+import { unauthorizedError, internalError } from '../../errors';
 
 type ParsedEvent = Parameters<ChangeEventStore['insert']>[0];
 
 export async function awsWebhookRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/api/v1/webhooks/aws', async (request, reply) => {
+    const secret = process.env.AWS_WEBHOOK_SECRET;
+    if (secret) {
+      const authHeader = request.headers.authorization as string | undefined;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return unauthorizedError(reply, 'Missing or invalid Authorization header');
+      }
+      const token = authHeader.slice(7);
+      if (token !== secret) {
+        return unauthorizedError(reply, 'Invalid token');
+      }
+    }
+
     const payload = request.body as Record<string, unknown>;
     const detailType = payload['detail-type'] as string;
     const detail = payload.detail as Record<string, unknown> || {};
