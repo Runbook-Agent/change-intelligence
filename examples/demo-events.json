@@ -1,0 +1,132 @@
+{
+  "events": [
+    {
+      "service": "api-gateway",
+      "changeType": "deployment",
+      "summary": "Deploy api-gateway v1.12.0 with edge routing updates",
+      "source": "github",
+      "initiator": "human",
+      "environment": "production",
+      "commitSha": "9a0f4f2",
+      "repository": "runbook/api-gateway",
+      "branch": "main",
+      "changeSetId": "release-2026-02-24-a",
+      "tags": ["release", "customer-facing"]
+    },
+    {
+      "service": "checkout-service",
+      "changeType": "deployment",
+      "summary": "Deploy checkout-service v2.8.1 with tax rounding fix",
+      "source": "github",
+      "initiator": "human",
+      "environment": "production",
+      "commitSha": "f6be3f0",
+      "repository": "runbook/checkout-service",
+      "branch": "main",
+      "changeSetId": "release-2026-02-24-a",
+      "tags": ["release", "checkout"]
+    },
+    {
+      "service": "billing-service",
+      "changeType": "config_change",
+      "summary": "Terraform applied new billing timeout + retry settings",
+      "source": "terraform",
+      "initiator": "automation",
+      "environment": "production",
+      "configKeys": ["BILLING_TIMEOUT_MS", "BILLING_RETRY_COUNT"],
+      "changeSetId": "release-2026-02-24-a",
+      "tags": ["terraform", "config"]
+    },
+    {
+      "service": "orders-db",
+      "changeType": "db_migration",
+      "summary": "Add index on orders(created_at, status)",
+      "source": "gitlab",
+      "initiator": "human",
+      "environment": "production",
+      "repository": "runbook/orders-db",
+      "changeSetId": "release-2026-02-24-a",
+      "tags": ["migration", "database"]
+    },
+    {
+      "service": "auth-service",
+      "changeType": "code_change",
+      "summary": "Agent refactor for token verification cache behavior",
+      "source": "claude_hook",
+      "initiator": "agent",
+      "initiatorIdentity": "claude-code",
+      "authorType": "autonomous_agent",
+      "testSignal": "passed",
+      "environment": "production",
+      "filesChanged": ["src/token.ts", "src/cache.ts"],
+      "tags": ["agent", "auth"]
+    },
+    {
+      "service": "redis-cache",
+      "changeType": "scaling",
+      "summary": "Increased redis-cache memory and replica count",
+      "source": "kubernetes",
+      "initiator": "automation",
+      "environment": "production",
+      "tags": ["scaling", "kubernetes"]
+    },
+    {
+      "service": "incident-api",
+      "changeType": "deployment",
+      "summary": "CodePipeline deployment for incident-api hotfix",
+      "source": "aws_codepipeline",
+      "initiator": "automation",
+      "environment": "production",
+      "status": "completed",
+      "tags": ["pipeline", "hotfix"]
+    },
+    {
+      "service": "api-gateway",
+      "changeType": "feature_flag",
+      "summary": "Enabled checkout_v2 for 20% of production traffic",
+      "source": "manual",
+      "initiator": "human",
+      "environment": "production",
+      "tags": ["feature-flag", "experiment"]
+    },
+    {
+      "service": "checkout-service",
+      "changeType": "rollback",
+      "summary": "Rolled back checkout-service due to elevated 5xx rate",
+      "source": "github",
+      "initiator": "automation",
+      "status": "rolled_back",
+      "environment": "production",
+      "tags": ["rollback", "incident"]
+    },
+    {
+      "service": "billing-service",
+      "changeType": "security_patch",
+      "summary": "Patched billing-service OpenSSL CVE dependency",
+      "source": "manual",
+      "initiator": "human",
+      "environment": "production",
+      "tags": ["security", "patch"]
+    },
+    {
+      "service": "event-bus",
+      "changeType": "infra_modification",
+      "summary": "Updated ECS task definition for event-bus workers",
+      "source": "aws_ecs",
+      "initiator": "automation",
+      "environment": "production",
+      "tags": ["infra", "ecs"]
+    },
+    {
+      "service": "incident-api",
+      "changeType": "deployment",
+      "summary": "Staging deploy for incident-api v0.21.0",
+      "source": "gitlab",
+      "initiator": "human",
+      "environment": "staging",
+      "repository": "runbook/incident-api",
+      "branch": "main",
+      "tags": ["staging", "deployment"]
+    }
+  ]
+}

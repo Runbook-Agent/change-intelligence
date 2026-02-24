@@ -1,0 +1,172 @@
+{
+  "components": [
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Component",
+      "metadata": {
+        "name": "api-gateway",
+        "namespace": "default",
+        "description": "Public edge gateway",
+        "tags": ["edge", "public"]
+      },
+      "spec": {
+        "type": "service",
+        "lifecycle": "production",
+        "owner": "team-platform",
+        "system": "commerce",
+        "dependsOn": [
+          "component:default/checkout-service",
+          "component:default/auth-service",
+          "resource:default/redis-cache"
+        ],
+        "providesApis": ["api:default/public-api"]
+      }
+    },
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Component",
+      "metadata": {
+        "name": "checkout-service",
+        "namespace": "default",
+        "description": "Checkout orchestration service",
+        "tags": ["checkout", "payments"]
+      },
+      "spec": {
+        "type": "service",
+        "lifecycle": "production",
+        "owner": "team-commerce",
+        "system": "commerce",
+        "dependsOn": [
+          "component:default/billing-service",
+          "resource:default/orders-db"
+        ],
+        "consumesApis": ["api:default/payments-api"]
+      }
+    },
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Component",
+      "metadata": {
+        "name": "billing-service",
+        "namespace": "default",
+        "description": "Billing calculations and payment dispatch",
+        "tags": ["billing", "payments"]
+      },
+      "spec": {
+        "type": "service",
+        "lifecycle": "production",
+        "owner": "team-payments",
+        "system": "commerce",
+        "dependsOn": [
+          "resource:default/payment-provider",
+          "resource:default/event-bus"
+        ],
+        "providesApis": ["api:default/payments-api"]
+      }
+    },
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Component",
+      "metadata": {
+        "name": "auth-service",
+        "namespace": "default",
+        "description": "Authentication and token verification",
+        "tags": ["auth", "identity"]
+      },
+      "spec": {
+        "type": "service",
+        "lifecycle": "production",
+        "owner": "team-platform",
+        "system": "platform",
+        "dependsOn": ["resource:default/redis-cache"]
+      }
+    },
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Component",
+      "metadata": {
+        "name": "incident-api",
+        "namespace": "default",
+        "description": "Internal incident query API",
+        "tags": ["incident", "sre"]
+      },
+      "spec": {
+        "type": "service",
+        "lifecycle": "production",
+        "owner": "team-sre",
+        "system": "operations",
+        "dependsOn": [
+          "resource:default/orders-db",
+          "resource:default/event-bus",
+          "component:default/auth-service"
+        ]
+      }
+    }
+  ],
+  "resources": [
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Resource",
+      "metadata": {
+        "name": "orders-db",
+        "namespace": "default",
+        "description": "Orders Postgres cluster",
+        "tags": ["postgres"]
+      },
+      "spec": {
+        "type": "database",
+        "lifecycle": "production",
+        "owner": "team-data",
+        "system": "commerce"
+      }
+    },
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Resource",
+      "metadata": {
+        "name": "redis-cache",
+        "namespace": "default",
+        "description": "Shared Redis cache",
+        "tags": ["redis"]
+      },
+      "spec": {
+        "type": "cache",
+        "lifecycle": "production",
+        "owner": "team-platform",
+        "system": "platform"
+      }
+    },
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Resource",
+      "metadata": {
+        "name": "event-bus",
+        "namespace": "default",
+        "description": "Event queue broker",
+        "tags": ["events", "queue"]
+      },
+      "spec": {
+        "type": "queue",
+        "lifecycle": "production",
+        "owner": "team-platform",
+        "system": "platform"
+      }
+    },
+    {
+      "apiVersion": "backstage.io/v1alpha1",
+      "kind": "Resource",
+      "metadata": {
+        "name": "payment-provider",
+        "namespace": "default",
+        "description": "External payment gateway account",
+        "tags": ["external", "vendor"]
+      },
+      "spec": {
+        "type": "external",
+        "lifecycle": "production",
+        "owner": "team-payments",
+        "system": "commerce"
+      }
+    }
+  ]
+}

@@ -1,0 +1,127 @@
+services:
+  - id: api-gateway
+    name: API Gateway
+    type: service
+    tier: critical
+    team: platform
+    tags: [public, edge]
+
+  - id: checkout-service
+    name: Checkout Service
+    type: service
+    tier: critical
+    team: commerce
+    tags: [payments, checkout]
+
+  - id: billing-service
+    name: Billing Service
+    type: service
+    tier: high
+    team: payments
+    tags: [billing]
+
+  - id: auth-service
+    name: Auth Service
+    type: service
+    tier: high
+    team: platform
+    tags: [auth, identity]
+
+  - id: incident-api
+    name: Incident API
+    type: service
+    tier: medium
+    team: sre
+    tags: [internal, observability]
+
+  - id: orders-db
+    name: Orders Database
+    type: database
+    tier: critical
+    team: data
+    tags: [postgres]
+
+  - id: redis-cache
+    name: Redis Cache
+    type: cache
+    tier: high
+    team: platform
+    tags: [redis]
+
+  - id: event-bus
+    name: Event Bus
+    type: queue
+    tier: high
+    team: platform
+    tags: [events]
+
+  - id: payment-provider
+    name: External Payment Provider
+    type: external
+    tier: high
+    team: payments
+    tags: [external, vendor]
+
+dependencies:
+  - source: api-gateway
+    target: checkout-service
+    type: sync
+    criticality: critical
+    edge_source: config
+    confidence: 1.0
+
+  - source: api-gateway
+    target: auth-service
+    type: sync
+    criticality: critical
+    edge_source: config
+    confidence: 1.0
+
+  - source: checkout-service
+    target: billing-service
+    type: sync
+    criticality: critical
+    edge_source: config
+    confidence: 1.0
+
+  - source: checkout-service
+    target: orders-db
+    type: database
+    criticality: critical
+    edge_source: config
+    confidence: 1.0
+
+  - source: billing-service
+    target: payment-provider
+    type: external
+    criticality: degraded
+    edge_source: config
+    confidence: 1.0
+
+  - source: billing-service
+    target: event-bus
+    type: async
+    criticality: degraded
+    edge_source: config
+    confidence: 1.0
+
+  - source: auth-service
+    target: redis-cache
+    type: cache
+    criticality: degraded
+    edge_source: config
+    confidence: 1.0
+
+  - source: incident-api
+    target: orders-db
+    type: database
+    criticality: optional
+    edge_source: config
+    confidence: 1.0
+
+  - source: incident-api
+    target: event-bus
+    type: async
+    criticality: optional
+    edge_source: config
+    confidence: 1.0

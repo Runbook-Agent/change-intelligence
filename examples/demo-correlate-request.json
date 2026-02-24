@@ -1,0 +1,6 @@
+{
+  "affected_services": ["api-gateway", "checkout-service"],
+  "incident_environment": "production",
+  "window_minutes": 180,
+  "max_results": 10
+}

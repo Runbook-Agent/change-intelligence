@@ -1,0 +1,7 @@
+{
+  "incident_environment": "production",
+  "window_minutes": 180,
+  "suspected_services": ["checkout-service", "billing-service"],
+  "symptom_tags": ["5xx", "payment-failures"],
+  "max_change_sets": 3
+}
