@@ -22,7 +22,7 @@ export async function terraformWebhookRoutes(fastify: FastifyInstance): Promise<
       const body = JSON.stringify(request.body);
       const expected = createHmac('sha512', secret).update(body).digest('hex');
 
-      if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+      if (!safeTimingEquals(signature, expected)) {
         return unauthorizedError(reply, 'Invalid signature');
       }
     }
@@ -51,6 +51,13 @@ export async function terraformWebhookRoutes(fastify: FastifyInstance): Promise<
       return internalError(reply, 'Failed to process Terraform webhook');
     }
   });
+}
+
+function safeTimingEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function parseTerraformNotification(

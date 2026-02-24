@@ -175,6 +175,36 @@ describe('Webhooks', () => {
     });
   });
 
+  // ─── GitHub Webhook ────────────────────────────────────────────────
+
+  describe('GitHub Webhook', () => {
+    it('returns 401 for malformed signature when secret is configured', async () => {
+      process.env.GITHUB_WEBHOOK_SECRET = 'github-secret';
+      try {
+        const res = await server.inject({
+          method: 'POST',
+          url: '/api/v1/webhooks/github',
+          headers: {
+            'x-github-event': 'push',
+            'x-hub-signature-256': 'sha256=abc',
+          },
+          payload: {
+            ref: 'refs/heads/main',
+            repository: { name: 'my-api', full_name: 'team/my-api' },
+            sender: { type: 'User', login: 'jdoe' },
+            head_commit: { id: 'abc123', message: 'fix bug' },
+            commits: [{ id: 'abc123', message: 'fix bug' }],
+          },
+        });
+
+        expect(res.statusCode).toBe(401);
+        expect(res.json().error).toBe('unauthorized');
+      } finally {
+        delete process.env.GITHUB_WEBHOOK_SECRET;
+      }
+    });
+  });
+
   // ─── GitLab Webhook ────────────────────────────────────────────────
 
   describe('GitLab Webhook', () => {
@@ -376,6 +406,30 @@ describe('Webhooks', () => {
       const event = await server.inject({ method: 'GET', url: `/api/v1/events/${res.json().id}` });
       expect(event.json().environment).toBe('development');
       expect(event.json().status).toBe('in_progress');
+    });
+
+    it('returns 401 for malformed signature when secret is configured', async () => {
+      process.env.TERRAFORM_WEBHOOK_SECRET = 'terraform-secret';
+      try {
+        const res = await server.inject({
+          method: 'POST',
+          url: '/api/v1/webhooks/terraform',
+          headers: {
+            'x-tfe-notification-signature': 'abc',
+          },
+          payload: {
+            workspace_name: 'infra-production',
+            notifications: [
+              { trigger: 'run:completed', run_status: 'applied' },
+            ],
+          },
+        });
+
+        expect(res.statusCode).toBe(401);
+        expect(res.json().error).toBe('unauthorized');
+      } finally {
+        delete process.env.TERRAFORM_WEBHOOK_SECRET;
+      }
     });
   });
 

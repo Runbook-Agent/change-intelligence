@@ -25,7 +25,7 @@ export async function githubWebhookRoutes(fastify: FastifyInstance): Promise<voi
       const body = JSON.stringify(request.body);
       const expected = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex');
 
-      if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+      if (!safeTimingEquals(signature, expected)) {
         return unauthorizedError(reply, 'Invalid signature');
       }
     }
@@ -46,6 +46,13 @@ export async function githubWebhookRoutes(fastify: FastifyInstance): Promise<voi
       return internalError(reply, 'Failed to process GitHub webhook');
     }
   });
+}
+
+function safeTimingEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function parseGitHubEvent(
