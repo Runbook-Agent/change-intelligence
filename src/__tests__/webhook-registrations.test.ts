@@ -41,6 +41,32 @@ describe('Webhook Registration Endpoint', () => {
     expect(body.url).toBe('https://example.com/webhook');
     expect(body.services).toEqual(['api']);
     expect(body.active).toBe(true);
+    expect(body.hasSecret).toBe(false);
+    expect(body.secret).toBeUndefined();
+  });
+
+  it('does not expose secret values in responses', async () => {
+    const createRes = await server.inject({
+      method: 'POST',
+      url: '/api/v1/webhooks/register',
+      payload: {
+        url: 'https://example.com/secure',
+        secret: 'super-secret',
+      },
+    });
+
+    expect(createRes.statusCode).toBe(201);
+    const created = createRes.json();
+    expect(created.hasSecret).toBe(true);
+    expect(created.secret).toBeUndefined();
+
+    const listRes = await server.inject({
+      method: 'GET',
+      url: '/api/v1/webhooks/registrations',
+    });
+    expect(listRes.statusCode).toBe(200);
+    expect(listRes.json().registrations[0].hasSecret).toBe(true);
+    expect(listRes.json().registrations[0].secret).toBeUndefined();
   });
 
   it('GET /api/v1/webhooks/registrations lists registrations', async () => {

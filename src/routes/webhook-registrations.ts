@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { validationError, notFoundError } from '../errors';
+import type { WebhookRegistration } from '../webhook-store';
 
 const RegisterWebhookSchema = z.object({
   url: z.string().url(),
@@ -13,6 +14,14 @@ const RegisterWebhookSchema = z.object({
   changeTypes: z.array(z.string()).optional(),
   environments: z.array(z.string()).optional(),
 });
+
+function toPublicWebhookRegistration(registration: WebhookRegistration): Omit<WebhookRegistration, 'secret'> & { hasSecret: boolean } {
+  const { secret, ...rest } = registration;
+  return {
+    ...rest,
+    hasSecret: Boolean(secret),
+  };
+}
 
 export async function webhookRegistrationRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/v1/webhooks/register — Register a webhook
@@ -23,12 +32,12 @@ export async function webhookRegistrationRoutes(fastify: FastifyInstance): Promi
     }
 
     const registration = fastify.webhookRegistrationStore.create(parsed.data);
-    return reply.status(201).send(registration);
+    return reply.status(201).send(toPublicWebhookRegistration(registration));
   });
 
   // GET /api/v1/webhooks/registrations — List all registrations
   fastify.get('/api/v1/webhooks/registrations', async (_request, reply) => {
-    const registrations = fastify.webhookRegistrationStore.list();
+    const registrations = fastify.webhookRegistrationStore.list().map(toPublicWebhookRegistration);
     return reply.send({ registrations });
   });
 

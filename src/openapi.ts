@@ -745,7 +745,7 @@ export const openapiSpec = {
         properties: {
           id: { type: 'string', format: 'uuid' },
           url: { type: 'string', format: 'uri' },
-          secret: { type: 'string' },
+          hasSecret: { type: 'boolean', description: 'True when a signing secret is configured. Secret values are never returned.' },
           services: { type: 'array', items: { type: 'string' } },
           changeTypes: { type: 'array', items: { type: 'string' } },
           environments: { type: 'array', items: { type: 'string' } },
