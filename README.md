@@ -17,6 +17,13 @@ The service starts on `http://localhost:3001`. Verify with:
 curl http://localhost:3001/api/v1/health
 ```
 
+## Production start
+
+```bash
+npm run build
+npm start
+```
+
 ## Architecture
 
 ```
@@ -47,7 +54,9 @@ All configuration is via environment variables:
 | `HOST` | `0.0.0.0` | Bind address |
 | `CHANGE_INTEL_DB_PATH` | `changes.db` | SQLite database file path |
 | `CHANGE_INTEL_GRAPH_PATH` | — | Path to a YAML service graph file |
+| `CHANGE_INTEL_ADMIN_TOKEN` | — | Bearer token that protects mutation/admin endpoints (`POST/PATCH/DELETE` and webhook registration management) |
 | `GITHUB_WEBHOOK_SECRET` | — | HMAC secret for GitHub webhook verification |
+| `AWS_WEBHOOK_SECRET` | — | Optional bearer token for AWS webhook ingestion |
 | `GITLAB_WEBHOOK_SECRET` | — | Token for GitLab webhook verification |
 | `TERRAFORM_WEBHOOK_SECRET` | — | HMAC-SHA512 secret for Terraform Cloud webhook verification |
 | `AGENT_WEBHOOK_SECRET` | — | Bearer token for coding agent webhook verification |
@@ -171,6 +180,7 @@ curl -X POST http://localhost:3001/api/v1/graph/import \
 ```bash
 curl -X POST http://localhost:3001/api/v1/events \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $CHANGE_INTEL_ADMIN_TOKEN" \
   -d '{
     "service": "user-service",
     "changeType": "deployment",
