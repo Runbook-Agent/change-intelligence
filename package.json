@@ -6,24 +6,25 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
+    "start": "tsx src/server.ts",
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "mcp": "node dist/server.js --mcp",
-    "mcp:dev": "tsx src/server.ts --mcp"
+    "mcp": "tsx src/server.ts --mcp",
+    "demo:seed": "bash scripts/demo-seed.sh",
+    "demo:backstage": "node scripts/mock-backstage-server.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "better-sqlite3": "^11.0.0",
     "fastify": "^5.2.1",
+    "tsx": "^4.21.0",
     "yaml": "^2.4.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
-    "tsx": "^4.21.0",
     "typescript": "^5.5.0",
     "vitest": "^3.2.4"
   },
