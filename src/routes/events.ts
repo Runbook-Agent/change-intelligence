@@ -73,6 +73,20 @@ const UpdateEventSchema = z.object({
   canonicalUrl: z.string().url().optional(),
 }).passthrough();
 
+const QueryEventsSchema = z.object({
+  services: z.string().optional(),
+  change_types: z.string().optional(),
+  sources: z.string().optional(),
+  environment: z.string().optional(),
+  since: z.string().optional(),
+  until: z.string().optional(),
+  initiator: z.enum(['human', 'agent', 'automation', 'unknown']).optional(),
+  status: z.enum(['in_progress', 'completed', 'failed', 'rolled_back']).optional(),
+  change_set_ids: z.string().optional(),
+  q: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
 export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
   // POST /api/v1/events — Create event
   fastify.post('/api/v1/events', async (request, reply) => {
@@ -107,7 +121,12 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
 
   // GET /api/v1/events — Query events
   fastify.get('/api/v1/events', async (request, reply) => {
-    const query = request.query as Record<string, string | undefined>;
+    const parsed = QueryEventsSchema.safeParse(request.query);
+    if (!parsed.success) {
+      return validationError(reply, parsed.error.issues);
+    }
+
+    const query = parsed.data;
 
     const options = {
       services: query.services?.split(',').filter(Boolean),
@@ -120,7 +139,7 @@ export async function eventsRoutes(fastify: FastifyInstance): Promise<void> {
       status: query.status as import('../types').ChangeStatus | undefined,
       changeSetIds: query.change_set_ids?.split(',').filter(Boolean),
       query: query.q,
-      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      limit: query.limit,
     };
 
     if (options.query) {

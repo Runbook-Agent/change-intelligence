@@ -55,7 +55,7 @@ export const openapiSpec = {
           { name: 'status', in: 'query', schema: { type: 'string', enum: ['in_progress', 'completed', 'failed', 'rolled_back'] } },
           { name: 'change_set_ids', in: 'query', schema: { type: 'string' }, description: 'Comma-separated change set IDs' },
           { name: 'q', in: 'query', schema: { type: 'string' }, description: 'Full-text search query' },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, minimum: 1, maximum: 500 } },
         ],
         responses: {
           '200': { description: 'List of events', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/ChangeEvent' } } } } },
@@ -186,8 +186,8 @@ export const openapiSpec = {
         description: 'Returns change frequency metrics. Use periods > 0 to get a multi-period trend.',
         parameters: [
           { name: 'service', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'window_minutes', in: 'query', schema: { type: 'integer', default: 60 } },
-          { name: 'periods', in: 'query', schema: { type: 'integer', default: 0 }, description: '0 = single window, > 0 = trend with N periods' },
+          { name: 'window_minutes', in: 'query', schema: { type: 'integer', default: 60, minimum: 1, maximum: 10080 } },
+          { name: 'periods', in: 'query', schema: { type: 'integer', default: 0, minimum: 0, maximum: 100 }, description: '0 = single window, > 0 = trend with N periods' },
         ],
         responses: {
           '200': { description: 'Velocity metrics or trend' },

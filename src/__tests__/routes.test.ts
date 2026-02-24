@@ -147,6 +147,12 @@ describe('Routes', () => {
       expect(events.length).toBe(1);
       expect(events[0].environment).toBe('staging');
     });
+
+    it('returns 400 for invalid query limit', async () => {
+      const res = await server.inject({ method: 'GET', url: '/api/v1/events?limit=-5' });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('validation_error');
+    });
   });
 
   describe('Correlate', () => {
@@ -283,6 +289,12 @@ describe('Routes', () => {
       const body = res.json();
       expect(body.trend).toBeDefined();
       expect(body.trend.length).toBe(3);
+    });
+
+    it('GET /api/v1/velocity/:service validates periods upper bound', async () => {
+      const res = await server.inject({ method: 'GET', url: '/api/v1/velocity/api?window_minutes=60&periods=1000' });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('validation_error');
     });
   });
 

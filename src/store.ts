@@ -354,7 +354,7 @@ export class ChangeEventStore {
       params.push(...options.changeSetIds);
     }
 
-    const limit = options.limit || 50;
+    const limit = this.clampLimit(options.limit, 50);
     let sql = 'SELECT * FROM change_events';
     if (conditions.length > 0) {
       sql += ` WHERE ${conditions.join(' AND ')}`;
@@ -384,7 +384,8 @@ export class ChangeEventStore {
       LIMIT ?
     `;
 
-    const rows = this.db.prepare(sql).all(ftsTerms, limit) as Record<string, unknown>[];
+    const safeLimit = this.clampLimit(limit, 20);
+    const rows = this.db.prepare(sql).all(ftsTerms, safeLimit) as Record<string, unknown>[];
     return rows.map(row => this.rowToEvent(row));
   }
 
@@ -567,5 +568,12 @@ export class ChangeEventStore {
       if (Number.isFinite(parsed)) return parsed;
     }
     return undefined;
+  }
+
+  private clampLimit(limit: number | undefined, fallback: number): number {
+    const value = typeof limit === 'number' && Number.isFinite(limit) ? Math.trunc(limit) : fallback;
+    if (value < 1) return 1;
+    if (value > 500) return 500;
+    return value;
   }
 }
