@@ -17,6 +17,74 @@ The service starts on `http://localhost:3001`. Verify with:
 curl http://localhost:3001/api/v1/health
 ```
 
+## Try The Demo In 5 Minutes
+
+This repo includes ready-to-run demo data so visitors can try the product immediately.
+
+| File | Purpose |
+|------|---------|
+| `examples/demo-graph.yaml` | Human-readable demo service graph |
+| `examples/demo-graph.json` | Graph import payload for `/api/v1/graph/import` |
+| `examples/demo-events.json` | Batch ingestion payload with realistic multi-source events |
+| `examples/demo-correlate-request.json` | Correlation request payload |
+| `examples/demo-triage-request.json` | Triage request payload |
+| `examples/demo-blast-radius-request.json` | Blast-radius request payload |
+| `examples/backstage-entities.json` | Mock Backstage catalog entities |
+| `examples/demo-backstage-import.json` | Request payload for Backstage graph import |
+
+1. Start the service (Terminal A)
+
+```bash
+npm install
+npm run build
+npm start
+```
+
+2. Seed demo graph + events (Terminal B)
+
+```bash
+# Optional: only set if your server is running with CHANGE_INTEL_ADMIN_TOKEN
+# export CHANGE_INTEL_ADMIN_TOKEN=demo-admin-token
+
+npm run demo:seed
+```
+
+3. Hit key read APIs (Terminal B)
+
+```bash
+curl "http://localhost:3001/api/v1/events?limit=5"
+
+curl -X POST http://localhost:3001/api/v1/correlate \
+  -H 'Content-Type: application/json' \
+  --data @examples/demo-correlate-request.json
+
+curl -X POST http://localhost:3001/api/v1/triage \
+  -H 'Content-Type: application/json' \
+  --data @examples/demo-triage-request.json
+```
+
+4. Optional: demo Backstage import locally
+
+Start mock Backstage server (Terminal C):
+
+```bash
+npm run demo:backstage
+```
+
+Import from mock Backstage (Terminal B):
+
+```bash
+AUTH_HEADER=()
+if [ -n "${CHANGE_INTEL_ADMIN_TOKEN:-}" ]; then
+  AUTH_HEADER=(-H "Authorization: Bearer ${CHANGE_INTEL_ADMIN_TOKEN}")
+fi
+
+curl -X POST http://localhost:3001/api/v1/graph/import/backstage \
+  "${AUTH_HEADER[@]}" \
+  -H 'Content-Type: application/json' \
+  --data @examples/demo-backstage-import.json
+```
+
 ## Production start
 
 ```bash
@@ -105,12 +173,14 @@ dependencies:
     confidence: 1.0
 ```
 
-Load on startup with `CHANGE_INTEL_GRAPH_PATH=graph.yaml`, or import at runtime:
+Load on startup with `CHANGE_INTEL_GRAPH_PATH=graph.yaml`, or import at runtime.
+If `CHANGE_INTEL_ADMIN_TOKEN` is set on the server, include the `Authorization` header:
 
 ```bash
 curl -X POST http://localhost:3001/api/v1/graph/import \
+  -H "Authorization: Bearer $CHANGE_INTEL_ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d @graph.json
+  -d @examples/demo-graph.json
 ```
 
 ## API reference
