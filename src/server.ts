@@ -7,7 +7,6 @@
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { existsSync } from 'fs';
-import { join } from 'path';
 
 import { ChangeEventStore } from './store';
 import { ServiceGraph, createServiceGraph } from './service-graph';
@@ -33,6 +32,7 @@ import { terraformWebhookRoutes } from './routes/webhooks/terraform';
 import { kubernetesWebhookRoutes } from './routes/webhooks/kubernetes';
 import { webhookRegistrationRoutes } from './routes/webhook-registrations';
 import { openapiRoutes } from './routes/openapi';
+import { unauthorizedError } from './errors';
 
 // Extend Fastify with our service decorations
 declare module 'fastify' {
@@ -52,6 +52,34 @@ export interface ServerOptions {
   port?: number;
   graphPath?: string;
   graphData?: object;
+  adminToken?: string;
+}
+
+const PROVIDER_WEBHOOK_PATHS = new Set([
+  '/api/v1/webhooks/github',
+  '/api/v1/webhooks/aws',
+  '/api/v1/webhooks/agent',
+  '/api/v1/webhooks/gitlab',
+  '/api/v1/webhooks/terraform',
+  '/api/v1/webhooks/kubernetes',
+]);
+
+function normalizePath(url: string): string {
+  const queryIndex = url.indexOf('?');
+  return queryIndex >= 0 ? url.slice(0, queryIndex) : url;
+}
+
+function requiresAdminAuth(method: string, path: string): boolean {
+  if (path === '/api/v1/webhooks/registrations') return method === 'GET';
+  if (path.startsWith('/api/v1/webhooks/registrations/')) return method === 'DELETE';
+  if (path === '/api/v1/webhooks/register') return method === 'POST';
+  if (path === '/api/v1/events') return method === 'POST';
+  if (path.startsWith('/api/v1/events/')) return method === 'PATCH' || method === 'DELETE';
+  if (path === '/api/v1/events/batch') return method === 'POST';
+  if (path === '/api/v1/graph/import') return method === 'POST';
+  if (path === '/api/v1/graph/import/backstage') return method === 'POST';
+  if (path === '/api/v1/graph/discover') return method === 'POST';
+  return false;
 }
 
 export async function createServer(options?: ServerOptions): Promise<FastifyInstance> {
@@ -60,6 +88,11 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
       level: process.env.LOG_LEVEL || 'info',
     },
   });
+  const adminToken = options?.adminToken ?? process.env.CHANGE_INTEL_ADMIN_TOKEN;
+
+  if (process.env.NODE_ENV === 'production' && !adminToken) {
+    throw new Error('CHANGE_INTEL_ADMIN_TOKEN must be set when NODE_ENV=production');
+  }
 
   // Initialize store
   const dbPath = options?.dbPath || process.env.CHANGE_INTEL_DB_PATH || 'changes.db';
@@ -101,6 +134,21 @@ export async function createServer(options?: ServerOptions): Promise<FastifyInst
     reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
     if (request.method === 'OPTIONS') {
       return reply.status(204).send();
+    }
+
+    const path = normalizePath(request.url);
+    if (PROVIDER_WEBHOOK_PATHS.has(path)) return;
+    if (!requiresAdminAuth(request.method, path)) return;
+    if (!adminToken) return;
+
+    const authHeader = request.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return unauthorizedError(reply, 'Missing or invalid admin token');
+    }
+
+    const token = authHeader.slice(7);
+    if (token !== adminToken) {
+      return unauthorizedError(reply, 'Invalid admin token');
     }
   });
 
